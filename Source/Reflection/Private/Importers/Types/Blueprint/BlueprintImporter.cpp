@@ -300,8 +300,9 @@ int32 IBlueprintImporter::ConstructBody() {
 int32 IBlueprintImporter::ConstructVariables() {
 	/* What the blueprint makes a property for on its own, which is not the same as what it declares.
 	 *
-	 * The construction script's components and the widget tree's widgets both get one when the
-	 * blueprint compiles, even though the class writes them down the same way it writes down
+	 * The construction script's components, the widget tree's widgets and a widget blueprint's
+	 * animations all get one when the blueprint compiles, even though the class writes them down
+	 * the same way it writes down
 	 * anything else. Declared as variables on top of that, the class carries two properties of one
 	 * name and whatever reads them by name gets the wrong one or stops on it. */
 	TSet<FString> Components = FBlueprintVariables::GetComponentVariables(GetContainer());
@@ -445,7 +446,26 @@ void IBlueprintImporter::ConstructWidgetTree() {
 	if (!GetAssetDataAsValue().Has("WidgetTree")) return;
 
 	UWidgetBlueprint* WidgetBlueprint = Cast<UWidgetBlueprint>(Blueprint);
-	
+
+	/* Said to keep a tree and not a widget blueprint.
+	 *
+	 * What kind of blueprint gets made comes from the class it says it comes from, so a parent that
+	 * did not resolve leaves an ordinary blueprint holding an export that describes a widget. There
+	 * is nowhere to put a tree on one of those, and reaching for the place it would go is reaching
+	 * off nothing. */
+	if (WidgetBlueprint == nullptr || WidgetBlueprint->WidgetTree == nullptr) {
+		FImportIssues::Report(
+			EImportIssue::Data,
+			FString::Printf(TEXT("\"%s\" has widgets and is not a widget blueprint"), *GetAssetName()),
+			FString::Printf(
+				TEXT("The export describes a tree of widgets, and what was made for '%s' is a plain blueprint with nowhere to keep one. That is the class it says it comes from having read back as something that is not a widget. Everything else about it was imported and the widgets were left out."),
+				*GetAssetName()
+			)
+		);
+
+		return;
+	}
+
 	for (UWidget* Widget : Cast<UWidgetTreeAccessor>(WidgetBlueprint->WidgetTree)->GetWidgets()) {
 		MoveToTransientPackageAndRename(Widget);
 	}

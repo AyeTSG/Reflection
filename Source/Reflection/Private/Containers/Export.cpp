@@ -63,6 +63,22 @@ UClass* FUObjectExport::GetClass() {
 		Asset.Split(TEXT("."), &Asset, nullptr, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
 
 		OutClass = LoadBlueprintClass(Asset);
+
+		/* And asked for where the project has not got it yet.
+		 *
+		 * Looking is only half of it. A widget tree is full of other widget blueprints, and each of
+		 * them is an asset of its own that nothing in reading this one has any reason to have
+		 * brought in: what a widget is comes from the export's own header rather than from its
+		 * properties, so nothing goes looking for it the way a property that names something
+		 * missing does. Left unasked every one of them reads as no class at all and the widget is
+		 * not made, so the tree comes out with the plain widgets in it and holes where the rest
+		 * were.
+		 *
+		 * It reaches as far as it needs to, since what comes in is read the same way and asks for
+		 * whatever it is made of. */
+		if (!OutClass && TToolImportFromPath::Import(Asset)) {
+			OutClass = LoadBlueprintClass(Asset);
+		}
 	}
 
 	/* Where it says it comes from, which is written beside the export as often as it is written

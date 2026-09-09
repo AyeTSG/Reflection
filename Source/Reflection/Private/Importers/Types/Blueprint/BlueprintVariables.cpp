@@ -214,6 +214,26 @@ TSet<FString> FBlueprintVariables::GetWidgetVariables(FUObjectExportContainer* C
 		}
 	}
 
+	/* And what its animations give it, which is a property apiece under the animation's own name.
+	 *
+	 * An animation is kept as RotatorHover_INST and the property made for it is RotatorHover, which
+	 * is the name the importer gives the animation itself when it makes it. Both are put in, since
+	 * the class writes the property down under the shorter one and nothing else says the two are
+	 * the same thing. */
+	for (const FUObjectExport* Export : Container->Exports) {
+		if (Export == nullptr || !Export->IsJsonValid()) continue;
+
+		if (Export->GetType() != TEXT("WidgetAnimation")) continue;
+
+		FString Called = Export->GetName().ToString();
+
+		Named.Add(Called);
+
+		if (Called.Split(TEXT("_INST"), &Called, nullptr, ESearchCase::CaseSensitive) && !Called.IsEmpty()) {
+			Named.Add(Called);
+		}
+	}
+
 	return Named;
 }
 

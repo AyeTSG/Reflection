@@ -86,6 +86,13 @@ public:
 	/* The statements it could make nothing of, for reporting what is still missing */
 	const TArray<FString>& GetUnhandled() const { return Unhandled; }
 
+	/* The function a call names, looked up rather than guessed at */
+	static UFunction* ResolveFunction(const FUObjectJsonValueExport& Reference);
+
+	/* A function on a class, by the name the game called it. Renames since are the engine's to
+	 * know, so one it no longer answers to is looked up through them. */
+	static UFunction* FindFunctionOn(const UClass* Class, const FString& Member);
+
 private:
 	/* One statement, as whatever it turns out to be: a node, a value, or nothing at all */
 	struct FValue {
@@ -143,13 +150,6 @@ private:
 
 	/* A call, of any of the four spellings the bytecode has for one */
 	UK2Node* PlaceCall(const FUObjectJsonValueExport& Expression, UEdGraphPin* Target, const UClass* Against = nullptr);
-
-	/* The function a call names, looked up rather than guessed at */
-	static UFunction* ResolveFunction(const FUObjectJsonValueExport& Reference);
-
-	/* A function on a class, by the name the game called it. Renames since are the engine's to
-	 * know, so one it no longer answers to is looked up through them. */
-	static UFunction* FindFunctionOn(const UClass* Class, const FString& Member);
 
 	/* A variable read, as the pin that carries it: a local the compiler made for a pin resolves to
 	 * that pin, anything else is a variable node */

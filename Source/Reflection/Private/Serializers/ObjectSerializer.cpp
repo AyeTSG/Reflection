@@ -20,6 +20,7 @@
 #include "Components/BrushComponent.h"
 #include "Engine/Brush.h"
 #include "Engine/Properties.h"
+#include "MovieSceneSection.h"
 #include "Particles/ParticleEmitter.h"
 #include "Particles/ParticleLODLevel.h"
 #include "Particles/ParticleSystem.h"
@@ -542,7 +543,14 @@ void UObjectSerializer::DeserializeObjectProperties(const TSharedPtr<FJsonObject
 		|| Cast<UParticleSystem>(Object)
 		|| Cast<UParticleLODLevel>(Object)
 		|| Cast<UParticleModule>(Object)
-		|| Cast<UParticleEmitter>(Object)) {
+		|| Cast<UParticleEmitter>(Object)
+		/* A section keeps its keys in channels, and which channels it has is worked out from what
+		 * it was just told rather than declared. A vector section made from nothing has none: it is
+		 * constructed using no channels at all and builds however many it turns out to use when it
+		 * is told, which is here. Left untold the keys are all in the object and the editor is
+		 * looking at a section that says it has nowhere to keep any, so the track draws empty over
+		 * a full set of them. */
+		|| Cast<UMovieSceneSection>(Object)) {
 		Object->PostEditImport();
 	}
 

@@ -37,10 +37,37 @@ int32 UReflectImportCommandlet::Main(const FString& Params) {
 		return 1;
 	}
 
-	const TSharedPtr<FJsonObject> Response = Cloud::Export::GetRawBlocking(Path);
+	TSharedPtr<FJsonObject> Response;
+
+	/* Read out of a file rather than off the cloud.
+	 *
+	 * What the cloud gives for a path is the same every time, which is what makes it worth reading
+	 * and no use for trying anything. Kept with -json and read back with -from, an export can be
+	 * changed and the change put through the same importer: an asset whose class this engine has
+	 * not got is reparented to one it has, and everything else about it is read the way it always
+	 * would be. The path is still said, since that is where what comes out is written. */
+	if (FString From; FParse::Value(*Params, TEXT("from="), From) && !From.IsEmpty()) {
+		FString Held;
+
+		if (!FFileHelper::LoadFileToString(Held, *From)) {
+			UE_LOG(LogReflectImport, Error, TEXT("there is nothing to read at \"%s\""), *From);
+
+			return 1;
+		}
+
+		if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Held), Response) || !Response.IsValid()) {
+			UE_LOG(LogReflectImport, Error, TEXT("\"%s\" is not something that reads as json"), *From);
+
+			return 1;
+		}
+
+		UE_LOG(LogReflectImport, Display, TEXT("reading \"%s\" rather than asking the cloud"), *From);
+	} else {
+		Response = Cloud::Export::GetRawBlocking(Path);
+	}
 
 	if (!Response.IsValid() || !Response->HasField(TEXT("exports"))) {
-		UE_LOG(LogReflectImport, Error, TEXT("the cloud had nothing at \"%s\""), *Path);
+		UE_LOG(LogReflectImport, Error, TEXT("there was nothing at \"%s\""), *Path);
 
 		return 1;
 	}

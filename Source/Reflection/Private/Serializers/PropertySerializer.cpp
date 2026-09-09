@@ -666,38 +666,48 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 
 			FMovieSceneFrameRange Range;
 
-			if (JsonObject->HasField(TEXT("LowerBound"))) {
-				TSharedPtr<FJsonObject> Bound = JsonObject->GetObjectField(TEXT("LowerBound"));
-				TSharedPtr<FJsonObject> BoundValue = Bound->GetObjectField(TEXT("Value"));
+			/* One end of it, of which there are three kinds and not two.
+			 *
+			 * Open is the third, and it is how a section that covers everything says so: a widget
+			 * animation's sections are written open at both ends. Read as neither of the other two
+			 * the bound was left as it was made, which is exclusive at nothing, and a range from
+			 * nothing to nothing is empty. An empty section is one the editor draws nowhere, so a
+			 * track came up blank over a full set of keys sitting in it.
+			 *
+			 * Said as a number where the export writes the byte and as a name where it writes the
+			 * enum, since both spellings turn up in the same asset. */
+			const auto ReadBound = [](const TSharedPtr<FJsonObject>& Bound) {
+				int32 Kind = 0;
 
-				int32 Type = Bound->GetIntegerField(TEXT("Type"));
-				int32 Value = BoundValue->GetIntegerField(TEXT("Value"));
+				if (const TSharedPtr<FJsonValue> Said = Bound->TryGetField(TEXT("Type")); Said.IsValid()) {
+					if (Said->Type == EJson::String) {
+						FString Spelled = Said->AsString();
+
+						Spelled.Split(TEXT("::"), nullptr, &Spelled);
+
+						Kind = Spelled == TEXT("Inclusive") ? 1 : Spelled == TEXT("Open") ? 2 : 0;
+					} else {
+						Kind = static_cast<int32>(Said->AsNumber());
+					}
+				}
+
+				if (Kind == 2) return TRangeBound<FFrameNumber>::Open();
 
 				FFrameNumber BoundFrame;
-				BoundFrame.Value = Value;
 
-				if (Type == 0) {
-					Range.Value.SetLowerBound(TRangeBound<FFrameNumber>::Exclusive(BoundFrame));
-				} else if (Type == 1) {
-					Range.Value.SetLowerBound(TRangeBound<FFrameNumber>::Inclusive(BoundFrame));
+				if (const TSharedPtr<FJsonObject>* Held = nullptr; Bound->TryGetObjectField(TEXT("Value"), Held)) {
+					(*Held)->TryGetNumberField(TEXT("Value"), BoundFrame.Value);
 				}
+
+				return Kind == 1 ? TRangeBound<FFrameNumber>::Inclusive(BoundFrame) : TRangeBound<FFrameNumber>::Exclusive(BoundFrame);
+			};
+
+			if (const TSharedPtr<FJsonObject>* Bound = nullptr; JsonObject->TryGetObjectField(TEXT("LowerBound"), Bound)) {
+				Range.Value.SetLowerBound(ReadBound(*Bound));
 			}
 
-			if (JsonObject->HasField(TEXT("UpperBound"))) {
-				TSharedPtr<FJsonObject> Bound = JsonObject->GetObjectField(TEXT("UpperBound"));
-				TSharedPtr<FJsonObject> BoundValue = Bound->GetObjectField(TEXT("Value"));
-
-				int32 Type = Bound->GetIntegerField(TEXT("Type"));
-				int32 Value = BoundValue->GetIntegerField(TEXT("Value"));
-
-				FFrameNumber BoundFrame;
-				BoundFrame.Value = Value;
-
-				if (Type == 0) {
-					Range.Value.SetUpperBound(TRangeBound<FFrameNumber>::Exclusive(BoundFrame));
-				} else if (Type == 1) {
-					Range.Value.SetUpperBound(TRangeBound<FFrameNumber>::Inclusive(BoundFrame));
-				}
+			if (const TSharedPtr<FJsonObject>* Bound = nullptr; JsonObject->TryGetObjectField(TEXT("UpperBound"), Bound)) {
+				Range.Value.SetUpperBound(ReadBound(*Bound));
 			}
 
 			*MovieSceneFrameRange = Range;
@@ -811,7 +821,11 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 		if (JsonValue->Type == EJson::String) {
 			FString EnumAsString = JsonValue->AsString();
 
-			check(ByteProperty->Enum);
+			if (!ByteProperty->Enum)
+			{
+				return;
+			}
+			
 			int64 EnumerationValue = ByteProperty->Enum->GetValueByNameString(EnumAsString);
 
 			/* Somethings wrong!!! */

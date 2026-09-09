@@ -509,6 +509,25 @@ UEdGraphPin* FBytecodeGraph::PointAtDelegate(UK2Node_BaseMCDelegate* Node, const
 				Owner = FindClassByType(Spelled);
 			}
 
+			/* Said inside the reference instead, which is where the owner goes when nothing
+			 * resolved it for us: MulticastDelegateProperty'FortHUDContext:OnUnableToPerformAction'.
+			 * Missed, the delegate is asked for on the blueprint itself, which has no dispatcher of
+			 * that name, and the node reads as an error over a name that was right all along. */
+			if (Owner == nullptr) {
+				FString Spelled = Points.GetString(TEXT("ObjectName"));
+
+				if (Spelled.Split(TEXT("'"), nullptr, &Spelled)) {
+					Spelled.RemoveFromEnd(TEXT("'"));
+
+					if (FString Held; Spelled.Split(TEXT(":"), &Held, nullptr)) {
+						/* Written either as the class alone or as the whole way down to it */
+						Held.Split(TEXT("."), nullptr, &Held, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+
+						Owner = FindClassByType(Held);
+					}
+				}
+			}
+
 			if (Owner != nullptr) Node->DelegateReference.SetExternalMember(FName(*Called), Owner);
 			else Node->DelegateReference.SetSelfMember(FName(*Called));
 		}
