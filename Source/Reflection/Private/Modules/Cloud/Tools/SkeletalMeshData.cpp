@@ -162,7 +162,7 @@ void TSkeletalMeshData::Process(UObject* Object, const TArray<TSharedPtr<FJsonVa
 			if (SectionsChanged > 0 || Properties->HasField(TEXT("SkinWeightProfiles"))) {
 				/* Section flags move the key on their own, skin weights do not */
 				if (SkinWeightProfiles > 0) {
-					SkeletalMesh->InvalidateDeriveDataCacheGUID();
+					InvalidateSkeletalMeshDerivedData(SkeletalMesh);
 				}
 
 				SkeletalMesh->PostEditChange();

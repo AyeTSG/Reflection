@@ -181,7 +181,7 @@ int32 IBlueprintImporter::ConstructInterfaces() {
 			if (int32 Sits; Where.FindLastChar(TEXT('.'), Sits)) {
 				const FString After = Where.RightChop(Sits + 1);
 
-				if (!After.IsEmpty() && After.IsNumeric()) Where.LeftInline(Sits);
+				if (!After.IsEmpty() && After.IsNumeric()) LeftInline(Where, Sits);
 			}
 
 			FString Leaf = Where;
@@ -1306,6 +1306,10 @@ int32 IBlueprintImporter::ConstructTimelines() {
 		 * every track intact and nothing saying how to show them: the node comes back with its ways
 		 * in and out and not one of its tracks. Put back in the order the tracks are kept in, which
 		 * is the order they were added. */
+/* 4.24 is where a timeline template started keeping this order at all. Before it the node
+ * grows its pins from the track arrays themselves, so a cooked template needs nothing put
+ * back. */
+#if !UE4_23_BELOW
 		if (Template->GetNumDisplayTracks() == 0) {
 			for (int32 Index = 0; Index < Template->EventTracks.Num(); ++Index) {
 				Template->AddDisplayTrack(FTTTrackId(FTTTrackBase::TT_Event, Index));
@@ -1323,6 +1327,7 @@ int32 IBlueprintImporter::ConstructTimelines() {
 				Template->AddDisplayTrack(FTTTrackId(FTTTrackBase::TT_LinearColorInterp, Index));
 			}
 		}
+#endif
 
 		/* And the node that starts it, which is what somebody actually drew */
 		if (Events != nullptr) {

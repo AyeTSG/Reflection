@@ -166,7 +166,6 @@ public class Reflection : ModuleRules {
 		});
 
 		PrivateDependencyModuleNames.AddRange(new[] {
-			"ScriptDisassembler",
 			"Projects",
 			"InputCore",
 			"CoreUObject",
@@ -204,14 +203,22 @@ public class Reflection : ModuleRules {
 			/* AInstancedFoliageActor and what it plants */
 			"Foliage",
 
-			/* FMeshDescription and FStaticMeshAttributes, which the static mesh importer describes
-			 * its geometry into */
+			/* FMeshDescription, which the static mesh importer describes its geometry into */
 			"MeshDescription",
+
+#if UE_4_24_OR_LATER
+			/* FStaticMeshAttributes, which 4.24 split out of MeshDescription */
 			"StaticMeshDescription",
+#endif
 
 #if UE_4_23_OR_LATER
 			/* PhysicsCore was carved out of Engine in 4.23 */
 			"PhysicsCore",
+#endif
+
+#if UE_4_24_OR_LATER
+			/* FKismetBytecodeDisassembler lived in UnrealEd until 4.24 gave it a module of its own */
+			"ScriptDisassembler",
 #endif
 
 #if UE_4_24_OR_LATER

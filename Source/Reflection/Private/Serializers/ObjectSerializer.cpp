@@ -32,7 +32,10 @@
 #endif
 #include "Engine/StaticMesh.h"
 #include "MeshDescription.h"
+/* Split out into StaticMeshDescription in 4.24; before that the attributes are named by hand */
+#if !UE4_23_BELOW
 #include "StaticMeshAttributes.h"
+#endif
 #include "StaticMeshResources.h"
 #include "Misc/Parse.h"
 #include "Settings/Runtime.h"

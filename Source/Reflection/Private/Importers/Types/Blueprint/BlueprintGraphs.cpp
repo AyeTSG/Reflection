@@ -3,7 +3,12 @@
 #include "Importers/Types/Blueprint/BlueprintGraphs.h"
 #include "AnimationGraphSchema.h"
 #include "AnimationGraph.h"
+/* Renamed from the sub input node in 4.24 */
+#if UE4_23_BELOW
+#include "AnimGraphNode_SubInput.h"
+#else
 #include "AnimGraphNode_LinkedInputPose.h"
+#endif
 #include "Importers/Types/Blueprint/BlueprintVariables.h"
 #include "Importers/Types/Blueprint/MacroPattern.h"
 

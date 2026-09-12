@@ -1016,7 +1016,7 @@ void FBytecodeGraph::BringInClass(const FUObjectJsonValueExport& Named) {
 		const FString After = Where.RightChop(Sits + 1);
 
 		if (!After.IsEmpty() && After.IsNumeric()) {
-			Where.LeftInline(Sits);
+			LeftInline(Where, Sits);
 		}
 	}
 
@@ -1370,7 +1370,7 @@ FBytecodeGraph::FValue FBytecodeGraph::ReadExpression(const FUObjectJsonValueExp
 			const FString After = Where.RightChop(Sits + 1);
 
 			if (!After.IsEmpty() && After.IsNumeric()) {
-				Where.LeftInline(Sits);
+				LeftInline(Where, Sits);
 			}
 		}
 
@@ -1395,7 +1395,7 @@ FBytecodeGraph::FValue FBytecodeGraph::ReadExpression(const FUObjectJsonValueExp
 			FString Package = Value.Literal;
 
 			if (int32 Sits; Package.FindLastChar(TEXT('.'), Sits)) {
-				Package.LeftInline(Sits);
+				LeftInline(Package, Sits);
 			}
 
 			if (!Kind.IsEmpty() && !Package.IsEmpty()) {
@@ -2306,7 +2306,7 @@ void FBytecodeGraph::ApplyLiteral(UEdGraphPin* Pin, const FString& Literal) {
 			FString Package = Value;
 
 			if (int32 Named; Package.FindLastChar(TEXT('.'), Named)) {
-				Package.LeftInline(Named);
+				LeftInline(Package, Named);
 			}
 
 			if (Takes != nullptr && !Package.IsEmpty()) {
@@ -3492,7 +3492,7 @@ bool FBytecodeGraph::PlaceMacro(const FMacroMatch& Match) {
 
 	/* Held open either way, since an input a macro works out after it begins is wired once the
 	 * statements that work it out have been laid down, and that is true however it runs */
-	Open.Push(MakeTuple(&Match, Node));
+	Open.Push(TTuple<const FMacroMatch*, UK2Node*>(&Match, Node));
 
 	/* A macro that said where each of its ways out goes is not a run of statements, so the run does
 	 * not carry on into it: each way out is linked to the address it leads to, once whatever is

@@ -401,7 +401,7 @@ int32 TMeshGeometry::RebuildLodModels(USkeletalMesh* SkeletalMesh, const TShared
 
 	/* Otherwise the build hands back the geometry it cached against the old source data */
 	if (RebuiltLods > 0) {
-		SkeletalMesh->InvalidateDeriveDataCacheGUID();
+		InvalidateSkeletalMeshDerivedData(SkeletalMesh);
 	}
 
 	SkeletalMesh->MarkPackageDirty();

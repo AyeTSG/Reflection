@@ -13,7 +13,10 @@
 #include "Importers/Constructor/ImportReader.h"
 #include "Importers/Constructor/Importer.h"
 #include "Modules/Cloud/Cloud.h"
+/* 5.0 gathered what a save is told into a header of its own */
+#if ENGINE_UE5
 #include "UObject/SavePackage.h"
+#endif
 
 DECLARE_LOG_CATEGORY_CLASS(LogReflectImport, All, All);
 

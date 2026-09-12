@@ -21,7 +21,10 @@
 #include "Importers/Constructor/Importer.h"
 #include "Modules/Cloud/Cloud.h"
 #include "Settings/Runtime.h"
+/* 5.0 gathered what a save is told into a header of its own */
+#if ENGINE_UE5
 #include "UObject/SavePackage.h"
+#endif
 #include "Interfaces/ITargetPlatformManagerModule.h"
 #include "Interfaces/ITargetPlatform.h"
 /* 5.1 split what a save is told about the cook it belongs to out into these. Nothing here asks

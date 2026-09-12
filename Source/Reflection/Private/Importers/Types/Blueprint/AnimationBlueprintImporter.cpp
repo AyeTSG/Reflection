@@ -7,7 +7,12 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_VariableGet.h"
+/* Renamed from the sub input node in 4.24 */
+#if UE4_23_BELOW
+#include "AnimGraphNode_SubInput.h"
+#else
 #include "AnimGraphNode_LinkedInputPose.h"
+#endif
 #include "AnimGraphNode_Root.h"
 #include "AnimationGraphSchema.h"
 #include "Animation/BlendProfile.h"
@@ -710,7 +715,7 @@ void IAnimationBlueprintImporter::ReadFolded(const TSharedPtr<FJsonObject>& Node
 
 		if (NodeType == TEXT("AnimGraphNode") || NodeType.IsEmpty()) NodeType = Key;
 
-		const UClass* Class = FindClassByType(NodeType);
+		UClass* Class = FindClassByType(NodeType);
 
 		if (Class == nullptr) continue;
 
@@ -1358,7 +1363,11 @@ void IAnimationBlueprintImporter::ShowBoundPins(const TSharedPtr<FJsonObject>& A
 
 		/* Asked of the node, since a binding can have come from either shape the cook arrives in
 		 * and only the node knows about both */
-		TArray<FName> Says = BoundPinNames(Node);
+		TArray<FName> Says;
+
+#if !UE4_25_BELOW
+		Says = BoundPinNames(Node);
+#endif
 
 		for (const FHandedOver& One : Bindings.FindRef(NodeExport->GetName().ToString())) {
 			Says.AddUnique(One.Member);

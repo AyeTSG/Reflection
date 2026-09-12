@@ -64,7 +64,9 @@ UObject* IAnimSequenceImporter::CreateAsset(UObject* CreatedAsset) {
 #if ENGINE_UE4
 		/* Compression started by the last import can still be running, and it reads the keys this
 		 * is about to throw away */
+#if !UE4_24_BELOW
 		Existing->WaitOnExistingCompression(false);
+#endif
 		Existing->RemoveAllTracks();
 #endif
 
