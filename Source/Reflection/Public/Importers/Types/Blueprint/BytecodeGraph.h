@@ -116,10 +116,14 @@ private:
 	UK2Node* FormatText(const FUObjectJsonValueExport& Expression);
 
 	/* A struct filled a member at a time, laid back out as the one node that makes one */
-	bool FillStruct(const FUObjectJsonValueExport& Statement, const FUObjectJsonValueExport& Variable);
+	bool FillStruct(const FUObjectJsonValueExport& Statement, const FUObjectJsonValueExport& Variable, const FValue& Expression);
 
 	/* A struct written out in full, read back as the text a default is kept in */
 	FString ReadStructConst(const FUObjectJsonValueExport& Expression);
+
+	/* One member of one, spelled the way a struct writes its members out. A pin says where and
+	 * which way round as its numbers alone, and a struct names them, so the two differ. */
+	FString SpellValue(const FProperty* Property, const FUObjectJsonValueExport& Expression);
 
 	/* Keeps what was worked out, where reaching it again costs nothing */
 	void Remember(const FString& Same, const FValue& Value);
@@ -129,6 +133,15 @@ private:
 
 	/* Works out which of the compiler's own names carry a value that never changes */
 	void FindConstants();
+
+	/* Works out which of the compiler's own locals carry an answer a branch decided */
+	void FindAnswers();
+
+	/* Works out which casts the run never went the other way out of */
+	void FindPureCasts();
+
+	/* Lays down the Return a branch was drawn with, and hands it what that branch decided */
+	bool AnswerHere(const FString& Out, const FValue& Expression);
 
 	/* Makes the node every matched macro was written as, before anything is laid out */
 	void MakeMacros();
@@ -227,6 +240,13 @@ private:
 
 	/* The pin every compiler made local stands for, by the name it was given */
 	TMap<FString, UEdGraphPin*> Locals;
+
+	/* What the function was handed, which it keeps as its own and reads by name */
+	TSet<FString> Handouts;
+
+	/* The macro pin a run reaching a statement arrives at, where that statement is one of a
+	 * macro's other ways in rather than anything of its own */
+	TMap<int32, UEdGraphPin*> Arrivals;
 
 	/* The last node with an execution pin, which the next one follows */
 	UEdGraphPin* Flow = nullptr;
@@ -338,6 +358,19 @@ private:
 	TMap<FString, FString> Carried;
 
 	bool bLookedForConstants = false;
+
+	/* The out parameter each of the compiler's answer locals is handed to, by its name */
+	TMap<FString, FString> Answered;
+
+	bool bLookedForAnswers = false;
+
+	/* The local each pure cast was put in, by which its node is known when it is built */
+	TSet<FString> PureCasts;
+
+	bool bLookedForPureCasts = false;
+
+	/* The local the statement being placed is writing, while its expression is read */
+	FString Writing;
 
 	/* Macros whose bodies are still being laid out, innermost last */
 	TArray<TPair<const FMacroMatch*, UK2Node*>> Open;

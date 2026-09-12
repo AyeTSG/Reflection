@@ -92,6 +92,18 @@ UObject* UObjectSerializer::SpawnExport(FUObjectExport* Export, const bool bOnly
 	}
 
 	const UClass* Class = Export->GetClass();
+
+#if ENGINE_UE5
+	/* UE5's CommonUI has no UCommonWidgetSwitcher of its own, so the export resolves to no class at all and
+	   the widget is never made. CommonUILegacy carries the original under its own name, and made as that one
+	   it still behaves the way the asset was authored against. */
+	if (Export->GetType() == TEXT("CommonWidgetSwitcher")) {
+		if (const UClass* LegacyClass = FindClassByType(TEXT("CommonWidgetSwitcherLegacy"))) {
+			Class = LegacyClass;
+		}
+	}
+#endif
+
 	if (!Class) return nullptr;
 
 	const FString Outer = GetOuterFromObjectOuter(Export->JsonObject->TryGetField(TEXT("Outer")));

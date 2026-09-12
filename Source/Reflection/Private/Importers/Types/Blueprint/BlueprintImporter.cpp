@@ -120,6 +120,14 @@ bool IBlueprintImporter::Import() {
 
 	ConstructBody();
 
+	/* Which graphs were open the last time somebody had it up, which is kept as a path to each one.
+	 *
+	 * Nothing here was told that and nothing reading the asset wants it, and the graphs are built
+	 * here rather than loaded, so a path left over from whatever the blueprint was before points at
+	 * a graph that is not there. Saving harvests one set of references and then writes another, and
+	 * the package save says so every time. */
+	Blueprint->LastEditedDocuments.Empty();
+
 	return OnAssetCreation(Blueprint);
 }
 

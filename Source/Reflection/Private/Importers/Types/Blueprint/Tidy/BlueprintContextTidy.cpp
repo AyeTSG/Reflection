@@ -76,63 +76,97 @@ struct FBlueprintContextTidy final : FGraphTidy {
 
 			UEdGraphPin* Gives = Calling->GetReturnValuePin();
 
-			/* Only where the cast is the whole of what reads it. Anything else holding the base
+			if (Gives == nullptr || Gives->LinkedTo.Num() == 0) continue;
+
+			/* Every cast that reads it, since the one call may be read by several.
+			 *
+			 * The base a context comes back as is worth nothing on its own, so whoever wrote two
+			 * of these wrote a node each and the compiler wrote the one call they both work out
+			 * from. Read back, that is one call with a cast hanging off it per node.
+			 *
+			 * Only where the casts are the whole of what reads it. Anything else holding the base
 			 * still wants the call, and taking it out would leave them reading nothing. */
-			if (Gives == nullptr || Gives->LinkedTo.Num() != 1) continue;
+			TArray<UK2Node_DynamicCast*> Casts;
 
-			UK2Node_DynamicCast* Casting = Cast<UK2Node_DynamicCast>(Gives->LinkedTo[0]->GetOwningNode());
+			bool bOnlyCasts = true;
 
-			if (Casting == nullptr || Casting->TargetType == nullptr) continue;
+			for (UEdGraphPin* Reader : Gives->LinkedTo) {
+				UK2Node_DynamicCast* Held = Reader != nullptr ? Cast<UK2Node_DynamicCast>(Reader->GetOwningNode()) : nullptr;
 
-			/* A cast that is asked whether it worked is a cast somebody wrote, and it is answering
-			 * a question the one node cannot */
-			if (!Casting->IsNodePure()) continue;
+				/* A cast that is asked whether it worked is a cast somebody wrote, and it is
+				 * answering a question the one node cannot */
+				if (Held == nullptr || Held->TargetType == nullptr || !Held->IsNodePure()) {
+					bOnlyCasts = false;
 
-			UEdGraphPin* Worked = Casting->GetBoolSuccessPin();
+					break;
+				}
 
-			if (Worked != nullptr && Worked->LinkedTo.Num() > 0) continue;
+				UEdGraphPin* Worked = Held->GetBoolSuccessPin();
 
-			UEdGraphPin* Reached = CastResult(Casting);
+				if (Worked != nullptr && Worked->LinkedTo.Num() > 0) {
+					bOnlyCasts = false;
 
-			if (Reached == nullptr) continue;
+					break;
+				}
 
-			UEdGraphNode* Made = NewObject<UEdGraphNode>(Graph, Kind);
+				if (CastResult(Held) == nullptr) {
+					bOnlyCasts = false;
 
-			Graph->AddNode(Made, false, false);
+					break;
+				}
 
-			Made->CreateNewGuid();
-			Made->PostPlacedNewNode();
-
-			Made->NodePosX = Calling->NodePosX;
-			Made->NodePosY = Calling->NodePosY;
-
-			/* Said before the pins are made, since the pin it hands out is of whatever this says */
-			Says->SetObjectPropertyValue_InContainer(Made, Casting->TargetType);
-
-			Made->AllocateDefaultPins();
-
-			UEdGraphPin* Hands = nullptr;
-
-			for (UEdGraphPin* Pin : Made->Pins) {
-				if (Pin->Direction == EGPD_Output) { Hands = Pin; break; }
+				Casts.Add(Held);
 			}
 
-			if (Hands == nullptr) {
-				Graph->RemoveNode(Made);
+			if (!bOnlyCasts || Casts.Num() == 0) continue;
 
-				continue;
+			int32 Stood = 0;
+
+			for (UK2Node_DynamicCast* Casting : Casts) {
+				UEdGraphNode* Made = NewObject<UEdGraphNode>(Graph, Kind);
+
+				Graph->AddNode(Made, false, false);
+
+				Made->CreateNewGuid();
+				Made->PostPlacedNewNode();
+
+				Made->NodePosX = Calling->NodePosX;
+				Made->NodePosY = Casting->NodePosY;
+
+				/* Said before the pins are made, since the pin it hands out is of whatever this says */
+				Says->SetObjectPropertyValue_InContainer(Made, Casting->TargetType);
+
+				Made->AllocateDefaultPins();
+
+				UEdGraphPin* Hands = nullptr;
+
+				for (UEdGraphPin* Pin : Made->Pins) {
+					if (Pin->Direction == EGPD_Output) { Hands = Pin; break; }
+				}
+
+				UEdGraphPin* Reached = CastResult(Casting);
+
+				if (Hands == nullptr || Reached == nullptr) {
+					Graph->RemoveNode(Made);
+
+					continue;
+				}
+
+				for (UEdGraphPin* Reader : Reached->LinkedTo) {
+					Hands->MakeLinkTo(Reader);
+				}
+
+				Reached->BreakAllPinLinks();
+
+				Graph->RemoveNode(Casting);
+
+				Stood++;
 			}
 
-			for (UEdGraphPin* Reader : Reached->LinkedTo) {
-				Hands->MakeLinkTo(Reader);
-			}
+			/* And the call goes once nothing is left reading it */
+			if (Stood == Casts.Num()) Graph->RemoveNode(Calling);
 
-			Reached->BreakAllPinLinks();
-
-			Graph->RemoveNode(Casting);
-			Graph->RemoveNode(Calling);
-
-			Put++;
+			Put += Stood;
 		}
 
 		if (Put > 0) {

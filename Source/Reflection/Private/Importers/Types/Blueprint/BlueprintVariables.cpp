@@ -5,6 +5,9 @@
 #include "Engine/EngineUtilities.h"
 #include "Utilities/JsonHelpers.h"
 #include "Containers/ExportContainer.h"
+#include "Engine/Package.h"
+#include "Modules/Toolbar/Tools/ImportFromPath.h"
+#include "Utilities/AssetPaths.h"
 
 #include "EdGraphSchema_K2.h"
 #include "Engine/Blueprint.h"
@@ -38,8 +41,26 @@ namespace {
 				LeftInline(ObjectPath, Dot);
 			}
 
-			if (T* Loaded = LoadObjectByPath<T>(ObjectPath + TEXT(".") + Name.ToString())) {
+			/* Said the way the editor says it. What the export carries is the cloud's spelling,
+			 * which is not a package name, so asked for as written it answers nothing however
+			 * surely the asset is there. */
+			const FString Held = ToEditorPackagePath(ObjectPath) + TEXT(".") + Name.ToString();
+
+			if (T* Loaded = LoadObjectByPath<T>(Held)) {
 				return Loaded;
+			}
+
+			/* And asked for where the project has not got it.
+			 *
+			 * A struct or an enum a blueprint declares is an asset of its own, and nothing else in
+			 * reading this one goes looking for it: it is named by what a property is rather than
+			 * by anything a property holds. Left unasked the type reads as nothing, and a parameter
+			 * whose type is nothing is left off the function altogether, which takes the node that
+			 * called it with it. */
+			if (TToolImportFromPath::Import(ObjectPath)) {
+				if (T* Made = LoadObjectByPath<T>(Held)) {
+					return Made;
+				}
 			}
 		}
 
