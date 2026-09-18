@@ -10,16 +10,40 @@
 DECLARE_LOG_CATEGORY_CLASS(LogReflectionTidyContext, All, All);
 
 namespace {
-	/* The node this puts back, which is not in any engine.
+	/* The two nodes this puts back, neither of which is named here at build time.
 	 *
-	 * It comes from a game's own editor module, so it is asked for by name and everything set on it
-	 * is set through the property system. A build without that module finds nothing and the tidying
-	 * does nothing, which is the right answer: the call and the cast are what the bytecode says and
-	 * they work. */
+	 * One comes from a game's own editor module, so it is asked for by name and everything set on
+	 * it is set through the property system. A build without that module finds nothing and the
+	 * tidying leaves what it covers alone, which is the right answer: the call and the cast are
+	 * what the bytecode says and they work. */
 	UClass* ContextNodeClass() {
 		static UClass* Kind = FindObject<UClass>(nullptr, TEXT("/Script/BlueprintContextEditor.K2Node_GetBlueprintContext"));
 
 		return Kind;
+	}
+
+	UClass* SubsystemNodeClass() {
+		static UClass* Kind = FindObject<UClass>(nullptr, TEXT("/Script/BlueprintGraph.K2Node_GetSubsystem"));
+
+		return Kind;
+	}
+
+	/* What a context is, asked for rather than linked against.
+	 *
+	 * This is the question, and it is asked first. A game may keep its contexts as subsystems, so
+	 * being one says nothing: everything that is a context would be a subsystem as well, and asking
+	 * that first sends every one of them to the wrong node. */
+	bool IsBlueprintContext(const UClass* Class) {
+		static UClass* Kind = FindObject<UClass>(nullptr, TEXT("/Script/BlueprintContext.BlueprintContextBase"));
+
+		return Class != nullptr && Kind != nullptr && Class->IsChildOf(Kind);
+	}
+
+	/* And a subsystem, for what is left */
+	bool IsSubsystem(const UClass* Class) {
+		static UClass* Kind = FindObject<UClass>(nullptr, TEXT("/Script/Engine.Subsystem"));
+
+		return Class != nullptr && Kind != nullptr && Class->IsChildOf(Kind);
 	}
 
 	/* What the cast was asked to reach, which is what the node is for */
@@ -36,28 +60,26 @@ namespace {
  *
  * A game that keeps its own per player state reaches it through one library call handed a class,
  * and the call is declared as giving back the base of them all. So whoever wrote it wrote one node,
- * and what the compiler wrote down is that node followed by a cast to the class they asked for,
- * because that is what the node does.
+ * and what the compiler wrote down is that node followed by a cast to the class they asked for.
  *
  * Read back statement by statement the cast comes with it, and the graph gains a pair of nodes
- * saying what one said. Worse, the pair is not what the editor offers: the node the game's own
- * editor module gives has the class on the node itself, so a graph rebuilt as a call and a cast
- * cannot be edited into the shape it came from.
+ * saying what one said. Worse, the pair is not what the editor offers: the node it gives has the
+ * class on the node itself, so a graph rebuilt as a call and a cast cannot be edited into the shape
+ * it came from.
  *
- * The pair only ever appears together in this one shape, so it is put back into the one node. */
+ * Which node depends on what was asked for. A class the game keeps as a subsystem is reached with
+ * the engine own Get Subsystem; anything else is the game own Get Blueprint Context, and that one
+ * refuses a class that is not one of its contexts. Handed the wrong one it clears what it was given
+ * and says it has no class, which is worse than the call it replaced, so what it took is read back
+ * before the call is thrown away.
+ *
+ * The one call may be read by several casts, since the value it gives is worth nothing until it is
+ * cast and whoever wrote two of these wrote a node each. */
 struct FBlueprintContextTidy final : FGraphTidy {
 	virtual const TCHAR* GetName() const override { return TEXT("BlueprintContext"); }
 
 	virtual int32 Apply(UEdGraph* Graph) const override {
 		if (Graph == nullptr) return 0;
-
-		UClass* Kind = ContextNodeClass();
-
-		if (Kind == nullptr) return 0;
-
-		FObjectProperty* Says = FindFProperty<FObjectProperty>(Kind, TEXT("CustomClass"));
-
-		if (Says == nullptr) return 0;
 
 		int32 Put = 0;
 
@@ -78,13 +100,7 @@ struct FBlueprintContextTidy final : FGraphTidy {
 
 			if (Gives == nullptr || Gives->LinkedTo.Num() == 0) continue;
 
-			/* Every cast that reads it, since the one call may be read by several.
-			 *
-			 * The base a context comes back as is worth nothing on its own, so whoever wrote two
-			 * of these wrote a node each and the compiler wrote the one call they both work out
-			 * from. Read back, that is one call with a cast hanging off it per node.
-			 *
-			 * Only where the casts are the whole of what reads it. Anything else holding the base
+			/* Only where the casts are the whole of what reads it. Anything else holding the base
 			 * still wants the call, and taking it out would leave them reading nothing. */
 			TArray<UK2Node_DynamicCast*> Casts;
 
@@ -95,7 +111,7 @@ struct FBlueprintContextTidy final : FGraphTidy {
 
 				/* A cast that is asked whether it worked is a cast somebody wrote, and it is
 				 * answering a question the one node cannot */
-				if (Held == nullptr || Held->TargetType == nullptr || !Held->IsNodePure()) {
+				if (Held == nullptr || Held->TargetType == nullptr || !Held->IsNodePure() || CastResult(Held) == nullptr) {
 					bOnlyCasts = false;
 
 					break;
@@ -109,12 +125,6 @@ struct FBlueprintContextTidy final : FGraphTidy {
 					break;
 				}
 
-				if (CastResult(Held) == nullptr) {
-					bOnlyCasts = false;
-
-					break;
-				}
-
 				Casts.Add(Held);
 			}
 
@@ -123,6 +133,18 @@ struct FBlueprintContextTidy final : FGraphTidy {
 			int32 Stood = 0;
 
 			for (UK2Node_DynamicCast* Casting : Casts) {
+				UClass* Wanted = Casting->TargetType.Get();
+
+				/* A context is a context however it is kept, so that is asked first and being a
+				 * subsystem only decides what is left */
+				UClass* Kind = IsBlueprintContext(Wanted) || !IsSubsystem(Wanted) ? ContextNodeClass() : SubsystemNodeClass();
+
+				if (Kind == nullptr) continue;
+
+				FObjectProperty* Says = FindFProperty<FObjectProperty>(Kind, TEXT("CustomClass"));
+
+				if (Says == nullptr) continue;
+
 				UEdGraphNode* Made = NewObject<UEdGraphNode>(Graph, Kind);
 
 				Graph->AddNode(Made, false, false);
@@ -134,9 +156,20 @@ struct FBlueprintContextTidy final : FGraphTidy {
 				Made->NodePosY = Casting->NodePosY;
 
 				/* Said before the pins are made, since the pin it hands out is of whatever this says */
-				Says->SetObjectPropertyValue_InContainer(Made, Casting->TargetType);
+				Says->SetObjectPropertyValue_InContainer(Made, Wanted);
 
 				Made->AllocateDefaultPins();
+
+				/* And read back after, since a node that will not hold the class clears it, and
+				 * what is left then says less than the call it was going to replace */
+				if (Says->GetObjectPropertyValue_InContainer(Made) != Wanted) {
+					Graph->RemoveNode(Made);
+
+					UE_LOG(LogReflectionTidyContext, Warning, TEXT("\"%s\" asks for a \"%s\", which %s will not hold, so it was left as the call it was written as"),
+						*Graph->GetName(), *Wanted->GetName(), *Kind->GetName());
+
+					continue;
+				}
 
 				UEdGraphPin* Hands = nullptr;
 

@@ -105,6 +105,14 @@ private:
 	/* What an expression says, spelled the same way every time, so the same one is recognised */
 	static FString Canonical(const FUObjectJsonValueExport& Expression);
 
+	/* Which writing of each local written more than once an expression reads, which is what tells
+	 * two readings of it apart */
+	FString Stamp(const FUObjectJsonValueExport& Expression) const;
+	void Gather(const FUObjectJsonValueExport& Expression, TArray<FString>& Saw) const;
+
+	/* How many times each local has been written so far */
+	TMap<FString, int32> Version;
+
 	/* The class a reference stands for, where it names a class's default object rather than an asset */
 	const UClass* ClassNamedBy(const FUObjectJsonValueExport& Expression);
 
@@ -299,7 +307,7 @@ private:
 	 * A run with nobody in front of it is checking the bytecode comes back the same, and every
 	 * tidying up is one more thing between what was read and what is compared. A run with somebody
 	 * in front of it wants the graph they would have written. */
-	const bool bTidy = !IsRunningCommandlet();
+	const bool bTidy = !IsRunningCommandlet() || FParse::Param(FCommandLine::Get(), TEXT("tidy"));
 
 	/* Something already worked out, and where it was worked out */
 	struct FShared {
@@ -358,6 +366,9 @@ private:
 	TMap<FString, FString> Carried;
 
 	bool bLookedForConstants = false;
+
+	/* How often each name is written, which says whether one node wrote it or several */
+	TMap<FString, int32> Writes;
 
 	/* The out parameter each of the compiler's answer locals is handed to, by its name */
 	TMap<FString, FString> Answered;

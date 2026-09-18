@@ -1105,13 +1105,67 @@ FString FBytecodeGraph::Canonical(const FUObjectJsonValueExport& Expression) {
 	return Spelled + TEXT("}");
 }
 
+/* Which writing of each local an expression reads, where the local is written more than once.
+ *
+ * Reading the same expression twice hands back the first reading, which is what makes one value
+ * wired to two things one node rather than two. A local written again between the two readings is
+ * not the same value both times: it stands for whichever node wrote it last, so the two readings
+ * have to be told apart. A local written again nowhere near them is the same value to both, and
+ * they are still worth sharing.
+ *
+ * So what is said here is which writing each reading saw. Two readings of a local between the same
+ * pair of writes say the same and share; two either side of a write say different things and do
+ * not. Locals written once say nothing, which is most of them.
+ *
+ * Put in order rather than taken as they come, since two readings of the same thing have to spell
+ * it the same way for either to be recognised as the other. */
+FString FBytecodeGraph::Stamp(const FUObjectJsonValueExport& Expression) const {
+	TArray<FString> Saw;
+
+	Gather(Expression, Saw);
+
+	if (Saw.Num() == 0) return FString();
+
+	Saw.Sort();
+
+	return TEXT("|as|") + FString::Join(Saw, TEXT(","));
+}
+
+void FBytecodeGraph::Gather(const FUObjectJsonValueExport& Expression, TArray<FString>& Saw) const {
+	if (!Expression.JsonObject.IsValid()) return;
+
+	for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : Expression.JsonObject->Values) {
+		const TSharedPtr<FJsonValue> Value = Field.Value;
+
+		if (!Value.IsValid()) continue;
+
+		if (Value->Type == EJson::Object) {
+			const FUObjectJsonValueExport Held(Value->AsObject());
+
+			if (Field.Key == TEXT("Variable")) {
+				const FString Name = MacroReading::NamedProperty(Held);
+
+				if (!Name.IsEmpty() && Writes.FindRef(Name) > 1) {
+					Saw.AddUnique(FString::Printf(TEXT("%s=%d"), *Name, Version.FindRef(Name)));
+				}
+			}
+
+			Gather(Held, Saw);
+		} else if (Value->Type == EJson::Array) {
+			for (const TSharedPtr<FJsonValue>& Each : Value->AsArray()) {
+				if (Each.IsValid() && Each->Type == EJson::Object) Gather(FUObjectJsonValueExport(Each->AsObject()), Saw);
+			}
+		}
+	}
+}
+
 FBytecodeGraph::FValue FBytecodeGraph::Read(const FUObjectJsonValueExport& Expression) {
 	/* Something worked out once is worth reading twice. The same struct member read three times is
 	 * three of the same node laid side by side, which is nothing anybody wants to look at.
 	 *
 	 * Asked and answered here rather than at each way out of the reading below, so every kind of
 	 * expression is shared on the same terms. */
-	const FString Same = bTidy ? Canonical(Expression) : FString();
+	const FString Same = bTidy ? Canonical(Expression) + Stamp(Expression) : FString();
 
 	if (!Same.IsEmpty()) {
 		if (const FShared* Known = Reused.Find(Same)) {
@@ -2589,9 +2643,26 @@ bool FBytecodeGraph::Place(const FUObjectJsonValueExport& Statement) {
 
 		Writing = Variable.Has(TEXT("Variable")) ? MacroReading::NamedProperty(Variable.GetObject(TEXT("Variable"))) : FString();
 
-		const FValue Expression = Read(Statement.GetObject(TEXT("Expression")));
+		/* A local written into more than once was written into by more than one node.
+		 *
+		 * What has been read before is handed back rather than read again, which is what makes a
+		 * value wired to two things one node rather than two. A second write of the same local is
+		 * not that: the compiler wrote it because there was a second node, spelled the same way
+		 * because it does the same thing. Read through the first one, the graph comes back with one
+		 * node where the game had two, and whatever the second one fed is left with nothing. */
+		const bool bAgain = !Writing.IsEmpty() && Writes.FindRef(Writing) > 1;
+
+		const FValue Expression = bAgain
+			? ReadExpression(Statement.GetObject(TEXT("Expression")))
+			: Read(Statement.GetObject(TEXT("Expression")));
+
+		const FString Into = Writing;
 
 		Writing = Was;
+
+		/* And from here on the local stands for what has just been written into it, which is not
+		 * what anything read out of it before */
+		if (!Into.IsEmpty()) Version.FindOrAdd(Into)++;
 
 		/* A struct built a member at a time, which is a Make Struct. The script has no way to say
 		 * a whole struct at once, so it names the struct it is filling and then each member. */
@@ -3267,6 +3338,11 @@ void FBytecodeGraph::FindConstants() {
 		if (!MacroReading::IsLet(MacroReading::TokenOf(Statement))) continue;
 
 		const FString Name = MacroReading::WrittenTo(Statement);
+
+		if (Name.IsEmpty()) continue;
+
+		/* How often each one is written at all, which says whether one node wrote it or several */
+		Writes.FindOrAdd(Name)++;
 
 		/* Only the compiler's own scratch is ever one of these. A variable the graph declared is
 		 * the graph's however seldom it is written. */

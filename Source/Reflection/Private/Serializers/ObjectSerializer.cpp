@@ -186,6 +186,47 @@ UObject* UObjectSerializer::SpawnExport(FUObjectExport* Export, const bool bOnly
 	
 	DeserializeObjectProperties(Export->GetProperties(), Export->Object);
 
+	{ /* PaperSprite handles */
+		static const UClass* Sprites = FindObject<UClass>(nullptr, TEXT("/Script/Paper2D.PaperSprite"));
+
+		if (Sprites != nullptr && Export->Object != nullptr && Export->Object->IsA(Sprites)) {
+			UObject* Cut = Export->Object;
+
+			const FObjectPropertyBase* Sheet = FindFProperty<FObjectPropertyBase>(Sprites, TEXT("BakedSourceTexture"));
+			const FSoftObjectProperty* From = FindFProperty<FSoftObjectProperty>(Sprites, TEXT("SourceTexture"));
+			const FStructProperty* BakedAt = FindFProperty<FStructProperty>(Sprites, TEXT("BakedSourceUV"));
+			const FStructProperty* At = FindFProperty<FStructProperty>(Sprites, TEXT("SourceUV"));
+			const FStructProperty* BakedBig = FindFProperty<FStructProperty>(Sprites, TEXT("BakedSourceDimension"));
+			const FStructProperty* Big = FindFProperty<FStructProperty>(Sprites, TEXT("SourceDimension"));
+
+			const UScriptStruct* Flat = TBaseStructure<FVector2D>::Get();
+
+			const bool bKnown = Sheet != nullptr && From != nullptr
+				&& At != nullptr && BakedAt != nullptr && At->Struct == Flat && BakedAt->Struct == Flat
+				&& Big != nullptr && BakedBig != nullptr && Big->Struct == Flat && BakedBig->Struct == Flat;
+
+			if (bKnown) {
+				UObject* Texture = Sheet->GetObjectPropertyValue_InContainer(Cut);
+
+				/* Only where the question is missing. A build that kept it knows better than this
+				 * does, and the answer is only worth working back from where nothing else says. */
+				const bool bAsked = !From->GetPropertyValue_InContainer(Cut).IsNull();
+
+				/* And only what the question is allowed to hold. The two are not declared as the
+				 * same kind of texture, and one it cannot hold would be dropped on the next load
+				 * after quietly replacing what was there. */
+				const bool bFits = Texture != nullptr && From->PropertyClass != nullptr && Texture->IsA(From->PropertyClass);
+
+				if (!bAsked && bFits) {
+					From->SetPropertyValue_InContainer(Cut, FSoftObjectPtr(Texture));
+
+					At->Struct->CopyScriptStruct(At->ContainerPtrToValuePtr<void>(Cut), BakedAt->ContainerPtrToValuePtr<void>(Cut));
+					Big->Struct->CopyScriptStruct(Big->ContainerPtrToValuePtr<void>(Cut), BakedBig->ContainerPtrToValuePtr<void>(Cut));
+				}
+			}
+		}
+	}
+
 	if (UParticleEmitter* ParticleEmitter = Cast<UParticleEmitter>(Export->Object)) {
 		ParticleEmitter->EmitterEditorColor = FColor::MakeRandomColor();
 		ParticleEmitter->EmitterEditorColor.A = 255;

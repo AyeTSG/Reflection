@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "Importers/Types/Texture/TextureTypes.h"
+
 #include "Engine/Compatibility.h"
 #include "Dom/JsonObject.h"
 #include "CoreMinimal.h"
@@ -72,13 +74,13 @@ public:
 public:
     /* Function to check if an asset needs to be imported. Once imported, the asset will be set and returned. */
     template <class T = UObject>
-    FORCEINLINE static TObjectPtr<T> DownloadWrapper(TObjectPtr<T> InObject, FString Type, const FString Name, const FString Path);
+    FORCEINLINE static TObjectPtr<T> DownloadWrapper(TObjectPtr<T> InObject, FString Type, const FString Name, const FString Path, const FString Lands = FString());
     /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Object Serializer and Property Serializer ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 };
 
 /* Defined in headers due to symbol errors */
 template <class T>
-TObjectPtr<T> IImporter::DownloadWrapper(TObjectPtr<T> InObject, FString Type, const FString Name, const FString Path) {
+TObjectPtr<T> IImporter::DownloadWrapper(TObjectPtr<T> InObject, FString Type, const FString Name, const FString Path, const FString Lands) {
     const UReflectionSettings* Settings = GetSettings();
 
     if ((
@@ -107,7 +109,14 @@ TObjectPtr<T> IImporter::DownloadWrapper(TObjectPtr<T> InObject, FString Type, c
             FAssetUtilities::ReflectedThisRun.Add(Reflected);
             
             /* Try importing the asset, saying only the success out loud */
-            if (FAssetUtilities::ConstructAsset(FSoftObjectPath(Type + "'" + NewPath + "." + Name + "'").ToString(), FSoftObjectPath(Type + "'" + NewPath + "." + Name + "'").ToString(), Type, InObject, DownloadStatus) && DownloadStatus) {
+            /* What is asked for and where it ends up are not always the same.
+             *
+             * Only the game has the thing, and it has it under the name the game gave it, so that
+             * is what is asked for. Where it lands is this project's business. */
+            const FString Asked = FSoftObjectPath(Type + "'" + NewPath + "." + Name + "'").ToString();
+            const FString Where = Lands.IsEmpty() ? Asked : FSoftObjectPath(Type + "'" + Lands + "'").ToString();
+
+            if (FAssetUtilities::ConstructAsset(Asked, Where, Type, InObject, DownloadStatus) && DownloadStatus) {
                 AppendNotification(
                     FText::FromString(Name),
                     FText::FromString(Type),
@@ -140,6 +149,14 @@ void IImporter::LoadExport(const TSharedPtr<FJsonObject>* PackageIndex, TObjectP
 
 	ObjectName = ObjectName.Replace(TEXT("'"), TEXT(""));
 
+	/* Inside is inside, however it is spelled.
+	 *
+	 * A reference names the first thing inside a package after a colon and everything below
+	 * that after a dot: Package:Inner.Deeper. Only the dot was peeled, so anything sitting
+	 * directly inside a package kept its outer glued to the front of its name and was asked
+	 * for as Package.Package:Inner, which is nowhere. */
+	ObjectName = ObjectName.Replace(TEXT(":"), TEXT("."));
+
 	/* Subobjects nest arbitrarily deep, so only the last segment names the export and the one
 	 * before it is its outer. Peeling a fixed number of segments off the front leaves anything
 	 * deeper than two levels unresolvable: a reroute inside a composite's subgraph comes through
@@ -155,9 +172,27 @@ void IImporter::LoadExport(const TSharedPtr<FJsonObject>* PackageIndex, TObjectP
 
 	ObjectPath = ToEditorPackagePath(ObjectPath);
 
+	/* A picture the game kept inside another asset, which has to come out as one of its own.
+	 *
+	 * A sheet of icons keeps the picture under itself and every sprite cut out of it names it that
+	 * way. There is nowhere for it to sit here: what kept it is a shell by the time it is cooked,
+	 * with everything about it left behind. So it comes out beside that shell instead, named for
+	 * what kept it rather than for the slot it happened to sit in. */
+	FString Lands;
+
+	if (FTextureTypes::IsSupported(ObjectType)) {
+		FString Leaf;
+
+		if (ObjectPath.Split(TEXT("/"), nullptr, &Leaf, ESearchCase::CaseSensitive, ESearchDir::FromEnd) && !Leaf.IsEmpty() && Leaf != ObjectName) {
+			Lands = ObjectPath + TEXT("_Texture.") + Leaf + TEXT("_Texture");
+		}
+	}
 
 	/* Try to load object using the object path and the object name combined */
-	TObjectPtr<T> LoadedObject = LoadObjectByPath<T>(ObjectPath + "." + ObjectName);
+	TObjectPtr<T> LoadedObject = Lands.IsEmpty() ? nullptr : LoadObjectByPath<T>(Lands);
+
+	/* And where it sat before this, for anything brought in the old way */
+	if (!LoadedObject) LoadedObject = LoadObjectByPath<T>(ObjectPath + "." + ObjectName);
 
 	if (!LoadedObject) {
 		FString NewObjectPath;
@@ -213,7 +248,7 @@ void IImporter::LoadExport(const TSharedPtr<FJsonObject>* PackageIndex, TObjectP
 
 	/* If object is still null, send off to Cloud to download */
 	if (!Object) {
-		Object = DownloadWrapper(LoadedObject, ObjectType, ObjectName, ObjectPath);
+		Object = DownloadWrapper(LoadedObject, ObjectType, ObjectName, ObjectPath, Lands);
 	}
 
 }
