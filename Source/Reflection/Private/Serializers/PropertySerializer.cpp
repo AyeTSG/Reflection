@@ -3,6 +3,8 @@
 #include "Serializers/PropertySerializer.h"
 
 #include "GameplayTagContainer.h"
+#include "GameplayTagsEditorModule.h"
+#include "GameplayTagsManager.h"
 #include "Importers/Constructor/Importer.h"
 #include "Serializers/ObjectSerializer.h"
 #include "UObject/TextProperty.h"
@@ -28,8 +30,48 @@
 #include "Serializers/Structs/TimeSpanSerializer.h"
 
 #include "Settings/Runtime.h"
+#include "Utilities/AssetPaths.h"
 
-DECLARE_LOG_CATEGORY_CLASS(LogReflectionPropertySerializer, Error, Log);
+/* Said at Log rather than Error, or nothing below an error is ever seen */
+DECLARE_LOG_CATEGORY_CLASS(LogReflectionPropertySerializer, Log, All);
+
+namespace {
+	/* Whether a reference has something to point at, without making it point at it. */
+	bool AlreadyHere(const FSoftObjectPath& Reference) {
+		if (Reference.ResolveObject() != nullptr) {
+			return true;
+		}
+
+		FString Held;
+
+		return PackageFileOf(Reference.GetLongPackageName(), Held);
+	}
+}
+
+/* A tag the game had and this project has not. */
+static FGameplayTag RequestOrMakeGameplayTag(const FString& Named) {
+	if (Named.IsEmpty() || Named == TEXT("None")) return FGameplayTag();
+
+	FGameplayTag Asked = FGameplayTag::RequestGameplayTag(FName(*Named), false);
+
+	if (Asked.IsValid()) return Asked;
+
+#if WITH_EDITOR
+	if (IGameplayTagsEditorModule* Tags = FModuleManager::Get().LoadModulePtr<IGameplayTagsEditorModule>(TEXT("GameplayTagsEditor"))) {
+		if (Tags->AddNewGameplayTagToINI(Named, TEXT(""))) {
+			Asked = FGameplayTag::RequestGameplayTag(FName(*Named), false);
+
+			UE_LOG(LogReflectionPropertySerializer, Display, TEXT("\"%s\" is a tag this project hadn't got, so it was added to the list"), *Named);
+		}
+	}
+#endif
+
+	if (!Asked.IsValid()) {
+		UE_LOG(LogReflectionPropertySerializer, Warning, TEXT("\"%s\" is a tag this project hasn't got, and it could not be added"), *Named);
+	}
+
+	return Asked;
+}
 
 /* Material Attributes ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -398,12 +440,37 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 	else if (FSoftObjectProperty* SoftObjectProperty = CastField<FSoftObjectProperty>(Property)) {
 		TSharedPtr<FJsonObject> SoftJsonObjectProperty;
 		FString PathString = "";
+
+		/* What the reference calls itself, which the property cannot be asked for */
+		FString Kind;
 		
 		switch (NewJsonValue->Type) {
 			/* UEParse, extract it from the object */
 			case EJson::Object:
 				SoftJsonObjectProperty = NewJsonValue->AsObject();
-				PathString = SoftJsonObjectProperty->GetStringField(TEXT("AssetPathName"));
+
+				if (!SoftJsonObjectProperty->TryGetStringField(TEXT("AssetPathName"), PathString)) {
+					/* Named the way every other reference is named, rather than written as a path. */
+					FString Named;
+					FString Where;
+
+					SoftJsonObjectProperty->TryGetStringField(TEXT("ObjectName"), Named);
+					SoftJsonObjectProperty->TryGetStringField(TEXT("ObjectPath"), Where);
+
+					if (Named.Split(TEXT("'"), &Kind, &Named)) {
+						Named.Split(TEXT("'"), &Named, nullptr, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+					}
+
+					/* Inside is inside, however it is spelled */
+					Named = Named.Replace(TEXT(":"), TEXT("."));
+
+					/* The package, which is the path as far as the export it names */
+					Where.Split(TEXT("."), &Where, nullptr);
+
+					if (!Named.IsEmpty() && !Where.IsEmpty()) {
+						PathString = ToEditorPackagePath(Where) + TEXT(".") + Named;
+					}
+				}
 			break;
 
 			/* Older game builds */
@@ -413,17 +480,20 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 		}
 
 		if (PathString != "") {
-			FSoftObjectPtr* ObjectPtr = static_cast<FSoftObjectPtr*>(OutValue);
-			*ObjectPtr = FSoftObjectPath(PathString);
+			const FSoftObjectPath Reference(PathString);
 
-			if (!ObjectPtr->LoadSynchronous()) {
+			FSoftObjectPtr* ObjectPtr = static_cast<FSoftObjectPtr*>(OutValue);
+			*ObjectPtr = Reference;
+
+			if (!AlreadyHere(Reference)) {
 				/* Try importing it using Cloud */
 				FString PackagePath;
 				FString AssetName;
 				PathString.Split(".", &PackagePath, &AssetName);
 				TObjectPtr<UObject> T = nullptr;
 
-				FString PropertyClassName = SoftObjectProperty->PropertyClass->GetName();
+				/* Asked for as the thing it is, rather than as whatever the property will hold. */
+				FString PropertyClassName = Kind.IsEmpty() ? SoftObjectProperty->PropertyClass->GetName() : Kind;
 				
 				IImporter::DownloadWrapper(T, PropertyClassName, AssetName, PackagePath);
 			}
@@ -435,6 +505,47 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 
 		if (NewJsonValue->IsNull()) {
 			SetObjectPropertyValueChecked(ObjectProperty, OutValue, nullptr);
+		}
+
+		/* Named the short way, as the one string rather than as a reference spelled out. */
+		if (NewJsonValue->Type == EJson::String) {
+			FString Named = NewJsonValue->AsString();
+
+			/* What the reference calls itself, which the property cannot be asked for */
+			FString Kind;
+
+			if (Named.Split(TEXT("'"), &Kind, &Named)) {
+				Named.Split(TEXT("'"), &Named, nullptr, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+			}
+
+			if (Named.IsEmpty() || Named == TEXT("None")) return;
+
+			const FString Where = ToEditorPackagePath(Named);
+
+			TObjectPtr<UObject> Points = LoadObjectByPath<UObject>(Where);
+
+			/* Only the game has it, and nothing under Script is ever fetched */
+			if (Points == nullptr && !Named.StartsWith(TEXT("/Script/"))) {
+				FString PackagePath;
+				FString AssetName;
+
+				if (Named.Split(TEXT("."), &PackagePath, &AssetName)) {
+					IImporter::DownloadWrapper(Points, Kind.IsEmpty() ? ObjectProperty->PropertyClass->GetName() : Kind, AssetName, PackagePath);
+				}
+
+				if (Points == nullptr) Points = LoadObjectByPath<UObject>(Where);
+			}
+
+			if (Points == nullptr) {
+				UE_LOG(LogReflectionPropertySerializer, Warning, TEXT("\"%s\" names %s, and nothing of that came back"),
+					*GetPropertyName(Property).ToString(), *Named);
+
+				return;
+			}
+
+			SetObjectPropertyValueChecked(ObjectProperty, OutValue, Points);
+
+			return;
 		}
 
 		if (NewJsonValue->Type == EJson::Object) {
@@ -502,11 +613,15 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 
 
 			if (Object != nullptr) {
-				bool bIsActorComponent = Object.Get()->IsA(UActorComponent::StaticClass());
-				
-				if (!bIsActorComponent) {
+				const bool bIsActorComponent = Object.Get()->IsA(UActorComponent::StaticClass());
+
+				/* Pointed at, whatever it is. */
+				if (!bIsActorComponent || GetPropertyName(ObjectProperty) == "AttachParent" || GetPropertyName(ObjectProperty) == "ComponentTemplate") {
 					SetObjectPropertyValueChecked(ObjectProperty, OutValue, Object);
-				} else {
+				}
+
+				/* And filled in, since what it is made of is written where it is named */
+				if (bIsActorComponent && GetPropertyName(ObjectProperty) != "AttachParent") {
 					if (FUObjectExport* TargetExport = ExportsContainer->GetExportByObjectPath(JsonValueAsObject)) {
 						FUObjectJsonValueExport Properties = TargetExport->GetObject(TEXT("Properties"));
 
@@ -514,13 +629,11 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 							Properties.SetArray(TEXT("LODData"), TargetExport->GetArray(TEXT("LODData")));
 						}
 
-						if (GetPropertyName(ObjectProperty) != "AttachParent") {
-							ObjectSerializer->DeserializeObjectProperties(Properties.JsonObject, Object);
-						} else {
-							SetObjectPropertyValueChecked(ObjectProperty, OutValue, Object);
-						}
+						ObjectSerializer->DeserializeObjectProperties(Properties.JsonObject, Object);
 					}
+				}
 
+				if (bIsActorComponent) {
 					if (UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(Object.Get())) {
 						StaticMeshComponent->PostEditImport();
 					}
@@ -612,6 +725,16 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 				}
 			}
 
+			/* Named something and came back with nothing. */
+			if (ObjectProperty->GetObjectPropertyValue(OutValue) == nullptr) {
+				FString Named;
+
+				JsonValueAsObject->TryGetStringField(TEXT("ObjectName"), Named);
+
+				UE_LOG(LogReflectionPropertySerializer, Warning, TEXT("\"%s\" names %s, and nothing of that came back"),
+					*GetPropertyName(Property).ToString(), Named.IsEmpty() ? TEXT("something it does not name") : *Named);
+			}
+
 			/* Too extreme it seems */
 #if 0
 			FUObjectExport NewExport(JsonValueAsObject);
@@ -639,7 +762,7 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 
 		if (StructProperty->Struct == FGameplayTag::StaticStruct()) {
 			FGameplayTag* GameplayTagStr = static_cast<FGameplayTag*>(OutValue);
-			FGameplayTag NewTag = FGameplayTag::RequestGameplayTag(FName(*NewJsonValue->AsObject()->GetStringField(TEXT("TagName"))), false);
+			FGameplayTag NewTag = RequestOrMakeGameplayTag(NewJsonValue->AsObject()->GetStringField(TEXT("TagName")));
 			*GameplayTagStr = NewTag;
 			return;
 		}
@@ -652,9 +775,9 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 
 			for (TSharedPtr GameplayTagValue : GameplayTags) {
 				FString GameplayTagString = GameplayTagValue->AsString();
-				FGameplayTag GameplayTag = FGameplayTag::RequestGameplayTag(FName(*GameplayTagString));
-				
-				GameplayTagContainerStr->AddTag(GameplayTag);
+				const FGameplayTag GameplayTag = RequestOrMakeGameplayTag(GameplayTagString);
+
+				if (GameplayTag.IsValid()) GameplayTagContainerStr->AddTag(GameplayTag);
 			}
 
 			return;
@@ -723,10 +846,12 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 			PathString = SoftJsonObjectProperty->GetStringField(TEXT("AssetPathName"));
 			
 			if (PathString != "") {
-				FSoftObjectPtr* ObjectPtr = static_cast<FSoftObjectPtr*>(OutValue);
-				*ObjectPtr = FSoftObjectPath(PathString);
+				const FSoftObjectPath Reference(PathString);
 
-				if (!ObjectPtr->LoadSynchronous()) {
+				FSoftObjectPtr* ObjectPtr = static_cast<FSoftObjectPtr*>(OutValue);
+				*ObjectPtr = Reference;
+
+				if (!AlreadyHere(Reference)) {
 					/* Try importing it using Cloud */
 					FString PackagePath;
 					FString AssetName;
@@ -851,6 +976,14 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 		else {
 			/* Should be a number, set property value accordingly */
 			const int64 NumberValue = static_cast<int64>(NewJsonValue->AsNumber());
+
+			/* A number the enum has no name for, which is what old data leaves lying about. */
+			if (ByteProperty->Enum != nullptr && !ByteProperty->Enum->IsValidEnumValue(NumberValue)) {
+				UE_LOG(LogReflectionPropertySerializer, Warning, TEXT("\"%s\" is a %s, which has no %lld, so it was left as it was built"), *GetPropertyName(ByteProperty).ToString(), *ByteProperty->Enum->GetName(), NumberValue);
+
+				return;
+			}
+
 			ByteProperty->SetIntPropertyValue(OutValue, NumberValue);
 		}
 		/* Primitives below, they are serialized as plain json values */
@@ -878,7 +1011,16 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 		 * only the number it was stored as to give. Read as a name, a number matches nothing and
 		 * the property keeps whatever it was constructed with. */
 		if (NewJsonValue->Type == EJson::Number) {
-			EnumProperty->GetUnderlyingProperty()->SetIntPropertyValue(OutValue, static_cast<int64>(NewJsonValue->AsNumber()));
+			const int64 NumberValue = static_cast<int64>(NewJsonValue->AsNumber());
+
+			/* And the same for one written as its own type rather than as a byte */
+			if (EnumProperty->GetEnum() != nullptr && !EnumProperty->GetEnum()->IsValidEnumValue(NumberValue)) {
+				UE_LOG(LogReflectionPropertySerializer, Warning, TEXT("\"%s\" is a %s, which has no %lld, so it was left as it was built"), *GetPropertyName(EnumProperty).ToString(), *EnumProperty->GetEnum()->GetName(), NumberValue);
+
+				return;
+			}
+
+			EnumProperty->GetUnderlyingProperty()->SetIntPropertyValue(OutValue, NumberValue);
 
 			return;
 		}
@@ -933,7 +1075,73 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 #if !UE4_24_BELOW
 	else if (CastField<const FFieldPathProperty>(Property)) {
 		FFieldPath FieldPath;
-		FieldPath.Generate(*NewJsonValue->AsString());
+
+		/* A field is pointed at rather than named, which takes what holds it and its own name */
+		if (NewJsonValue->Type == EJson::String) {
+			FieldPath.Generate(*NewJsonValue->AsString());
+		} else if (NewJsonValue->Type == EJson::Object) {
+			const TSharedPtr<FJsonObject> Said = NewJsonValue->AsObject();
+
+			FString Name;
+			FString Where;
+
+			Said->TryGetStringField(TEXT("ObjectName"), Name);
+			Said->TryGetStringField(TEXT("ObjectPath"), Where);
+
+			if (Name.Contains(TEXT("'"))) {
+				Name.Split(TEXT("'"), nullptr, &Name);
+				Name.Split(TEXT("'"), &Name, nullptr, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+			}
+
+			FString Holder;
+			FString Named;
+
+			if (!Name.Split(TEXT(":"), &Holder, &Named)) {
+				Named = Name;
+			}
+
+			/* The package it is in, which is what the path says where it says anything past it */
+			FString Package = Where;
+
+			if (int32 Dot; Where.FindChar(TEXT('.'), Dot)) {
+				Package = Where.Left(Dot);
+			}
+
+			UStruct* Holds = nullptr;
+
+			if (!Holder.IsEmpty() && !Package.IsEmpty()) {
+				Holds = FindObject<UStruct>(nullptr, *(Package + TEXT(".") + Holder));
+
+				/* And where this build has not got it, asked for the way anything else is */
+				if (Holds == nullptr) {
+					if (Importer == nullptr) {
+						Importer = new IImporter();
+					}
+
+					Importer->SetParent(ObjectSerializer->Parent);
+
+					TSharedPtr<FJsonObject> Points = MakeShared<FJsonObject>();
+
+					Points->SetStringField(TEXT("ObjectName"), FString::Printf(TEXT("Class'%s'"), *Holder));
+					Points->SetStringField(TEXT("ObjectPath"), Where);
+
+					TObjectPtr<UObject> Found = nullptr;
+
+					Importer->LoadExport(&Points, Found);
+
+					Holds = Cast<UStruct>(Found.Get());
+				}
+			}
+
+			if (FProperty* Points = Holds != nullptr && !Named.IsEmpty() ? FindFProperty<FProperty>(Holds, *Named) : nullptr) {
+				FieldPath = FFieldPath(Points);
+			} else if (!Named.IsEmpty()) {
+				UE_LOG(LogReflectionPropertySerializer, Warning, TEXT("\"%s\" points at \"%s\" of \"%s\", and %s"),
+					*GetPropertyName(Property).ToString(), *Named, Holder.IsEmpty() ? TEXT("nothing") : *Holder,
+					Holds != nullptr ? TEXT("what holds it has nothing of that name") : TEXT("this build hasn't got what holds it"));
+			}
+		}
+
 		*static_cast<FFieldPath*>(OutValue) = FieldPath;
 	}
 #endif

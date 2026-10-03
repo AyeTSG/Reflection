@@ -54,10 +54,10 @@ namespace {
 		return Node;
 	}
 
-	/* The name an event node answers to, however it came to be one */
+	/* The name an event node answers to, however it came to be one. */
 	FName CalledBy(const UK2Node_Event* Event) {
-		if (const UK2Node_CustomEvent* Custom = Cast<UK2Node_CustomEvent>(Event)) {
-			return Custom->CustomFunctionName;
+		if (!Event->bOverrideFunction && !Event->CustomFunctionName.IsNone()) {
+			return Event->CustomFunctionName;
 		}
 
 		return Event->EventReference.GetMemberName();

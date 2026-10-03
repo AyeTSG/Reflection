@@ -122,6 +122,7 @@ inline void BuildAnimNotifyTracks(UAnimSequenceBase* Sequence) {
 
 	int32 RowCount = Sequence->Notifies.Num() > 0 ? 1 : 0;
 
+
 	for (FAnimNotifyEvent& Notify : Sequence->Notifies) {
 		if (Notify.TrackIndex < 0 || Notify.TrackIndex > 20) {
 			Notify.TrackIndex = 0;
@@ -130,11 +131,24 @@ inline void BuildAnimNotifyTracks(UAnimSequenceBase* Sequence) {
 		RowCount = FMath::Max(RowCount, Notify.TrackIndex + 1);
 	}
 
+	/* A sequence's markers sit on the same rows its notifies do, and name them the same way */
+	if (const UAnimSequence* Marked = Cast<UAnimSequence>(Sequence)) {
+		for (const FAnimSyncMarker& Marker : Marked->AuthoredSyncMarkers) {
+			if (Marker.TrackIndex >= 0 && Marker.TrackIndex <= 20) {
+				RowCount = FMath::Max(RowCount, Marker.TrackIndex + 1);
+			}
+		}
+	}
+
 	while (Sequence->AnimNotifyTracks.Num() < RowCount) {
 		Sequence->AnimNotifyTracks.Add(FAnimNotifyTrack(
 			*FString::FromInt(Sequence->AnimNotifyTracks.Num() + 1),
 			FLinearColor::White
 		));
+	}
+
+	if (Sequence->AnimNotifyTracks.Num() > RowCount) {
+		Sequence->AnimNotifyTracks.SetNum(RowCount);
 	}
 #endif
 }

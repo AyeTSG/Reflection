@@ -21,6 +21,17 @@
 #include "Importers/Constructor/Asset.h"
 #include "Engine/Package.h"
 #include "Utilities/AssetPaths.h"
+#include "Misc/PackageName.h"
+#include "Misc/Paths.h"
+
+/* The file a package name lands on, if any. */
+inline bool PackageFileOf(const FString& LongPackageName, FString& OutFilename) {
+#if ENGINE_UE5
+	return FPackageName::DoesPackageExist(LongPackageName, &OutFilename);
+#else
+	return FPackageName::DoesPackageExist(LongPackageName, nullptr, &OutFilename);
+#endif
+}
 
 /* Base handler for converting JSON to assets */
 class REFLECTION_API IImporter : public USerializerContainer {
@@ -149,6 +160,9 @@ void IImporter::LoadExport(const TSharedPtr<FJsonObject>* PackageIndex, TObjectP
 
 	ObjectName = ObjectName.Replace(TEXT("'"), TEXT(""));
 
+	/* Whether it names something the package holds rather than the package's own asset */
+	const bool bWithin = ObjectName.Contains(TEXT(":"));
+
 	/* Inside is inside, however it is spelled.
 	 *
 	 * A reference names the first thing inside a package after a colon and everything below
@@ -171,6 +185,13 @@ void IImporter::LoadExport(const TSharedPtr<FJsonObject>* PackageIndex, TObjectP
 	}
 
 	ObjectPath = ToEditorPackagePath(ObjectPath);
+
+	/* Something inside a map, which is not an asset and cannot be asked for as one. */
+	FString Held;
+
+	if (bWithin && PackageFileOf(ObjectPath, Held) && FPaths::GetExtension(Held, true) == FPackageName::GetMapPackageExtension()) {
+		return;
+	}
 
 	/* A picture the game kept inside another asset, which has to come out as one of its own.
 	 *
@@ -248,9 +269,10 @@ void IImporter::LoadExport(const TSharedPtr<FJsonObject>* PackageIndex, TObjectP
 
 	/* If object is still null, send off to Cloud to download */
 	if (!Object) {
+		if (ObjectType == "WidgetBlueprintGeneratedClass") return;
+		
 		Object = DownloadWrapper(LoadedObject, ObjectType, ObjectName, ObjectPath, Lands);
 	}
-
 }
 
 template <typename T>

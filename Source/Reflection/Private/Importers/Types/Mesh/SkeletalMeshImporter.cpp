@@ -53,7 +53,7 @@ namespace {
 	const TArray<UMorphTarget*>& MeshMorphTargets(const USkeletalMesh* Mesh) { return Mesh->MorphTargets; }
 #endif
 
-#if UE4_25_BELOW
+#if UE4_24_BELOW
 	FSkeletalMeshLODModel* MeshLodModel(const USkeletalMesh* Mesh, const int32 Lod) {
 		FSkeletalMeshModel* Model = Mesh->GetImportedModel();
 

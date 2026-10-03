@@ -23,6 +23,7 @@ TMap<FString, TArray<FString>> ImportTypes::Templated = {
 			TEXT("HLODProxy"),
 			TEXT("AnimBoneCompressionSettings"),
 			TEXT("AnimCurveCompressionSettings"),
+			TEXT("FortBakedPropertyMetadataCache"),
 		}
 	},
 	{

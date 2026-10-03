@@ -7,6 +7,7 @@
 #include "Importers/Types/Blueprint/MacroPattern.h"
 
 class UEdGraph;
+class UK2Node_FunctionResult;
 class UEdGraphPin;
 class UK2Node;
 class UK2Node_Variable;
@@ -41,7 +42,7 @@ public:
 	void EnterAt(int32 Address, UK2Node* Node, FName Through = NAME_None);
 
 	/* Says that what the graph reads under one name is what an event was handed under another */
-	void HandOver(const FString& Frame, const FString& Parameter);
+	void HandOver(const FString& Frame, const FString& Parameter, UK2Node* Node);
 
 	/* Says that what the graph reads under one name is a pin of a node it already has.
 	 *
@@ -99,8 +100,14 @@ private:
 		UEdGraphPin* Pin = nullptr;
 		FString Literal;
 
+		/* The local it is, where that is worked out by a call not laid down yet */
+		FString Wanted;
+
 		bool IsSet() const { return Pin != nullptr || !Literal.IsEmpty(); }
 	};
+
+	/* Hands a value to a pin, or remembers to once whatever works it out has been placed */
+	void Give(const FValue& What, UEdGraphPin* To);
 
 	/* What an expression says, spelled the same way every time, so the same one is recognised */
 	static FString Canonical(const FUObjectJsonValueExport& Expression);
@@ -283,8 +290,15 @@ private:
 	/* What a write answers into, against the property it would have been written to */
 	TMap<FString, UEdGraphPin*> Decided;
 
-	/* The name the graph reads a value under, against the name whoever entered it calls it */
-	TMap<FString, FString> Handed;
+	/* The Return the statement before this one answered through */
+	int32 AnsweredAt = INDEX_NONE;
+	TWeakObjectPtr<UK2Node_FunctionResult> AnsweredWith;
+
+	/* Pins waiting on a local that a call further down the list hands out */
+	TArray<TPair<UEdGraphPin*, FString>> Later;
+
+	/* The name a value is read under, against the event that hands it over */
+	TMap<FString, TPair<TWeakObjectPtr<UK2Node>, FString>> Handed;
 
 	/* The same, where what it stands for is a pin of a node rather than another name. Held as the
 	 * node and the pin's name, since settling the locals lays the graph out again. */
@@ -361,6 +375,9 @@ private:
 	 * Told apart from a macro's scratch by being written once and only ever from a constant. A
 	 * loop's counter is written again every time round, so it is never one of these. */
 	TSet<FString> Constants;
+
+	/* The ones worked out from themselves: a counter, a total, anything that runs */
+	TSet<FString> Running;
 
 	/* What each of those carries, once the statement that writes it has been read */
 	TMap<FString, FString> Carried;

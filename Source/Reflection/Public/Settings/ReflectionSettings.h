@@ -73,6 +73,11 @@ public:
 
 	virtual FText GetSectionText() const override;
 
+#if WITH_EDITOR
+	/* Switching the support prompt takes effect now rather than at the next start */
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
+
 public:
 	UPROPERTY(EditAnywhere, Config, Category = Redirectors, meta = (TitleProperty = "Name"))
 	TArray<FRRedirector> Redirectors;
@@ -95,4 +100,8 @@ public:
 	/* Enables experimental/developing features. Features may not work as intended. */
 	UPROPERTY(EditAnywhere, Config, DisplayName = "Experiments", Category = Settings, AdvancedDisplay)
 	bool EnableExperiments = false;
+
+	/* The nudge to star the repository, which comes round now and then */
+	UPROPERTY(EditAnywhere, Config, DisplayName = "Support Prompt", Category = Settings, AdvancedDisplay)
+	bool ShowSupportPrompt = true;
 };

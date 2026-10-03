@@ -176,7 +176,7 @@ struct FAccessorTidy final : FGraphTidy {
 
 					/* And the run through it, which a write is part of */
 					HandOver(Writing->GetExecPin(), Call->GetExecPin());
-					HandOver(Writing->GetThenPin(), Call->GetThenPin());
+					HandOver(Writing->FindPin(UEdGraphSchema_K2::PN_Then, EGPD_Output), Call->GetThenPin());
 
 					bStood = true;
 				}

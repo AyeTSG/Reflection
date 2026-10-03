@@ -139,6 +139,7 @@ public class Reflection : ModuleRules {
 			"MainFrame",
 			"AIModule",
 				"GameplayTags",
+			"GameplayTagsEditor",
 			"ApplicationCore",
 			"AnimGraph",
 			"UMGEditor",

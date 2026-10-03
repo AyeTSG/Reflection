@@ -66,14 +66,38 @@ void UObjectSerializer::SetupExports(const TArray<TSharedPtr<FJsonValue>>& InObj
  * the second case: RootComponent0 on a foliage actor is made by the actor's own constructor, and
  * the export naming it is naming the thing that is there rather than asking for another. */
 namespace {
-	UObject* AlreadyThere(UObject* Outer, const FName Named) {
+	UObject* AlreadyThere(UObject* Outer, const FName Named, const UClass* Wanted) {
 		if (Outer == nullptr || Named.IsNone()) return nullptr;
 
-		return StaticFindObjectFast(UObject::StaticClass(), Outer, Named);
+		UObject* Standing = StaticFindObjectFast(UObject::StaticClass(), Outer, Named);
+
+		if (Standing == nullptr) return nullptr;
+
+		/* There under that name, and not the thing the export is talking about. */
+		if (Wanted != nullptr && !Standing->IsA(Wanted)) {
+			MoveToTransientPackageAndRename(Standing);
+
+			return nullptr;
+		}
+
+		return Standing;
 	}
 
 	bool CanBeMade(const UClass* Class, const FString& Named, const FString& Type) {
 		if (Class == nullptr) return false;
+
+		/* A class is found, never made. */
+		if (Class->IsChildOf(UClass::StaticClass())) {
+			UE_LOG(LogReflection, Error, TEXT("\"%s\" is written as a %s and this build has no class of that name, so nothing was made for it"), *Named, *Type);
+
+			FImportIssues::Report(
+				EImportIssue::MissingClass,
+				FString::Printf(TEXT("\"%s\" could not be made"), *Named),
+				FString::Printf(TEXT("The export says it is a %s and this build has no class of that name. What is left to go on names a class rather than an object, and a class is not something that can be made: it would come out with no parent and no default object and take a later compile down with it. Nothing was put in its place and the rest of the import carried on."), *Type)
+			);
+
+			return false;
+		}
 
 		if (!Class->HasAnyClassFlags(CLASS_Abstract)) return true;
 
@@ -89,7 +113,28 @@ namespace {
 	}
 }
 
+namespace {
+	/* The exports part way through being made, innermost last. */
+	TArray<FUObjectExport*> GBeingMade;
+
+	/* Marks one as being made for as long as the call making it is running. */
+	struct FSpawnScope {
+		explicit FSpawnScope(FUObjectExport* InExport) : Export(InExport) { GBeingMade.Add(Export); }
+
+		~FSpawnScope() { GBeingMade.Remove(Export); }
+
+		FUObjectExport* Export;
+	};
+}
+
 UObject* UObjectSerializer::SpawnExport(FUObjectExport* Export, const bool bOnlySerialize) {
+	if (Export == nullptr) return nullptr;
+
+	/* Already being made further up the stack, so what there is of it is all there is to give. */
+	if (GBeingMade.Contains(Export)) return Export->Object;
+
+	const FSpawnScope BeingMade(Export);
+
 	if (!bOnlySerialize) {
 		if (Export->Object != nullptr) return nullptr;
 	}
@@ -171,7 +216,25 @@ UObject* UObjectSerializer::SpawnExport(FUObjectExport* Export, const bool bOnly
 
 		const FName Named = StringToName(ObjectName);
 
-		if (UObject* Standing = AlreadyThere(ObjectOuter, Named)) {
+		/* Only made where its kind is allowed to live.
+		 *
+		 * An outer named as a generated class is taken back to the blueprint above, which is right for
+		 * a widget tree and wrong for a function: a function lives in the class, and the engine calls
+		 * one made anywhere else fatal rather than handing it back. That class is the compiler's to
+		 * fill in, so a function the export names is left for it. */
+		if (ObjectOuter != nullptr && Class->ClassWithin != nullptr && !ObjectOuter->IsA(Class->ClassWithin)) {
+			UE_LOG(LogReflection, Error, TEXT("\"%s\" is a %s, which has to live in a %s, and its outer is %s, so nothing was made for it"), *ObjectName, *Class->GetName(), *Class->ClassWithin->GetName(), *ObjectOuter->GetFullName());
+
+			FImportIssues::Report(
+				EImportIssue::Data,
+				FString::Printf(TEXT("\"%s\" could not be made"), *ObjectName),
+				FString::Printf(TEXT("A %s can only be made inside a %s, and the outer this export resolved to is %s. Making it there would stop the editor, so nothing was put in its place and the rest of the import carried on."), *Class->GetName(), *Class->ClassWithin->GetName(), *ObjectOuter->GetFullName())
+			);
+
+			return nullptr;
+		}
+
+		if (UObject* Standing = AlreadyThere(ObjectOuter, Named, Class)) {
 			Export->Object = Standing;
 		} else if (CanBeMade(Class, ObjectName, Export->GetType().ToString())) {
 			Export->Object = NewObject<UObject>(ObjectOuter, ToNewObjectClass(Class), Named, Flags);
@@ -186,46 +249,6 @@ UObject* UObjectSerializer::SpawnExport(FUObjectExport* Export, const bool bOnly
 	
 	DeserializeObjectProperties(Export->GetProperties(), Export->Object);
 
-	{ /* PaperSprite handles */
-		static const UClass* Sprites = FindObject<UClass>(nullptr, TEXT("/Script/Paper2D.PaperSprite"));
-
-		if (Sprites != nullptr && Export->Object != nullptr && Export->Object->IsA(Sprites)) {
-			UObject* Cut = Export->Object;
-
-			const FObjectPropertyBase* Sheet = FindFProperty<FObjectPropertyBase>(Sprites, TEXT("BakedSourceTexture"));
-			const FSoftObjectProperty* From = FindFProperty<FSoftObjectProperty>(Sprites, TEXT("SourceTexture"));
-			const FStructProperty* BakedAt = FindFProperty<FStructProperty>(Sprites, TEXT("BakedSourceUV"));
-			const FStructProperty* At = FindFProperty<FStructProperty>(Sprites, TEXT("SourceUV"));
-			const FStructProperty* BakedBig = FindFProperty<FStructProperty>(Sprites, TEXT("BakedSourceDimension"));
-			const FStructProperty* Big = FindFProperty<FStructProperty>(Sprites, TEXT("SourceDimension"));
-
-			const UScriptStruct* Flat = TBaseStructure<FVector2D>::Get();
-
-			const bool bKnown = Sheet != nullptr && From != nullptr
-				&& At != nullptr && BakedAt != nullptr && At->Struct == Flat && BakedAt->Struct == Flat
-				&& Big != nullptr && BakedBig != nullptr && Big->Struct == Flat && BakedBig->Struct == Flat;
-
-			if (bKnown) {
-				UObject* Texture = Sheet->GetObjectPropertyValue_InContainer(Cut);
-
-				/* Only where the question is missing. A build that kept it knows better than this
-				 * does, and the answer is only worth working back from where nothing else says. */
-				const bool bAsked = !From->GetPropertyValue_InContainer(Cut).IsNull();
-
-				/* And only what the question is allowed to hold. The two are not declared as the
-				 * same kind of texture, and one it cannot hold would be dropped on the next load
-				 * after quietly replacing what was there. */
-				const bool bFits = Texture != nullptr && From->PropertyClass != nullptr && Texture->IsA(From->PropertyClass);
-
-				if (!bAsked && bFits) {
-					From->SetPropertyValue_InContainer(Cut, FSoftObjectPtr(Texture));
-
-					At->Struct->CopyScriptStruct(At->ContainerPtrToValuePtr<void>(Cut), BakedAt->ContainerPtrToValuePtr<void>(Cut));
-					Big->Struct->CopyScriptStruct(Big->ContainerPtrToValuePtr<void>(Cut), BakedBig->ContainerPtrToValuePtr<void>(Cut));
-				}
-			}
-		}
-	}
 
 	if (UParticleEmitter* ParticleEmitter = Cast<UParticleEmitter>(Export->Object)) {
 		ParticleEmitter->EmitterEditorColor = FColor::MakeRandomColor();
@@ -389,7 +412,7 @@ void UObjectSerializer::DeserializeExport(FUObjectExport* Export, TMap<TSharedPt
 		ObjectOuter = Parent;
 	}
 
-	UObject* NewUObject = AlreadyThere(ObjectOuter, FName(*Name));
+	UObject* NewUObject = AlreadyThere(ObjectOuter, FName(*Name), Class);
 
 	if (NewUObject == nullptr) {
 		if (!CanBeMade(Class, Name, Type)) return;
@@ -595,6 +618,97 @@ void UObjectSerializer::DeserializeObjectProperties(const TSharedPtr<FJsonObject
 		}
 	}
 	
+	{
+		/* An effect written before the tags moved off it. */
+		static const UClass* Effects = nullptr;
+
+		if (Effects == nullptr) {
+			Effects = FindObject<UClass>(nullptr, TEXT("/Script/GameplayAbilities.GameplayEffect"));
+		}
+
+		if (Effects != nullptr && Object != nullptr && Object->IsA(Effects) && Object->HasAnyFlags(RF_ClassDefaultObject)) {
+			/* The version is left out of the reflected data, and nought predates every upgrade */
+			const FStructProperty* Stamped = FindFProperty<FStructProperty>(Effects, TEXT("DataVersion"));
+
+			if (Stamped != nullptr && Stamped->Struct != nullptr && Stamped->Struct->GetFName() == TEXT("GameplayEffectVersion")) {
+				*Stamped->ContainerPtrToValuePtr<uint8>(Object) = 0;
+
+				/* A component reaches the effect it belongs to through its outer and nothing else */
+				if (const FArrayProperty* Parts = FindFProperty<FArrayProperty>(Effects, TEXT("GEComponents"))) {
+					if (const FObjectPropertyBase* Each = CastField<FObjectPropertyBase>(Parts->Inner)) {
+						FScriptArrayHelper Held(Parts, Parts->ContainerPtrToValuePtr<void>(Object));
+
+						for (int32 At = 0; At < Held.Num(); ++At) {
+							UObject* Part = Each->GetObjectPropertyValue(Held.GetRawPtr(At));
+
+							if (Part == nullptr || Part->GetTypedOuter(const_cast<UClass*>(Effects)) == Object) continue;
+
+							UE_LOG(LogReflection, Display, TEXT("\"%s\" was kept outside the effect whose list it is in, and was moved under it"), *Part->GetName());
+
+							Part->Rename(nullptr, Object, REN_DontCreateRedirectors | REN_NonTransactional);
+						}
+					}
+				}
+
+				/* Told the default object is settled, which is when the upgrade runs */
+#if ENGINE_UE5
+				/* Only where there is an effect this one was made from. */
+				const UObject* Made = Object->GetArchetype();
+
+				if (Made != nullptr && Made != Object && Made->IsA(Effects)) {
+					FPostCDOCompiledContext Brought;
+
+					Object->PostCDOCompiled(Brought);
+				} else {
+					FImportIssues::Report(
+						EImportIssue::Data,
+						FString::Printf(TEXT("\"%s\" was not brought forward"), *Object->GetName()),
+						TEXT("An effect keeps its tags in the old places and the engine moves them into components of their own, reading the effect this one was made from as it goes. That one is not settled yet, which happens where a reference opened this import partway through another. The tags are left where they were, so the effect grants none of them, and importing it on its own will bring them forward.")
+					);
+				}
+#endif
+			}
+		}
+	}
+
+	{ /* PaperSprite handles */
+		static const UClass* Sprites = FindObject<UClass>(nullptr, TEXT("/Script/Paper2D.PaperSprite"));
+
+		if (Sprites != nullptr && Object != nullptr && Object->IsA(Sprites)) {
+			UObject* Cut = Object;
+
+			const FObjectPropertyBase* Sheet = FindFProperty<FObjectPropertyBase>(Sprites, TEXT("BakedSourceTexture"));
+			const FSoftObjectProperty* From = FindFProperty<FSoftObjectProperty>(Sprites, TEXT("SourceTexture"));
+			const FStructProperty* BakedAt = FindFProperty<FStructProperty>(Sprites, TEXT("BakedSourceUV"));
+			const FStructProperty* At = FindFProperty<FStructProperty>(Sprites, TEXT("SourceUV"));
+			const FStructProperty* BakedBig = FindFProperty<FStructProperty>(Sprites, TEXT("BakedSourceDimension"));
+			const FStructProperty* Big = FindFProperty<FStructProperty>(Sprites, TEXT("SourceDimension"));
+
+			const UScriptStruct* Flat = TBaseStructure<FVector2D>::Get();
+
+			const bool bKnown = Sheet != nullptr && From != nullptr
+				&& At != nullptr && BakedAt != nullptr && At->Struct == Flat && BakedAt->Struct == Flat
+				&& Big != nullptr && BakedBig != nullptr && Big->Struct == Flat && BakedBig->Struct == Flat;
+
+			if (bKnown) {
+				UObject* Texture = Sheet->GetObjectPropertyValue_InContainer(Cut);
+
+				/* Only where the question is missing: a build that kept it knows better */
+				const bool bAsked = !From->GetPropertyValue_InContainer(Cut).IsNull();
+
+				/* And only what the question is allowed to hold */
+				const bool bFits = Texture != nullptr && From->PropertyClass != nullptr && Texture->IsA(From->PropertyClass);
+
+				if (!bAsked && bFits) {
+					From->SetPropertyValue_InContainer(Cut, FSoftObjectPtr(Texture));
+
+					At->Struct->CopyScriptStruct(At->ContainerPtrToValuePtr<void>(Cut), BakedAt->ContainerPtrToValuePtr<void>(Cut));
+					Big->Struct->CopyScriptStruct(Big->ContainerPtrToValuePtr<void>(Cut), BakedBig->ContainerPtrToValuePtr<void>(Cut));
+				}
+			}
+		}
+	}
+
 	if (Cast<UStaticMeshComponent>(Object)
 		|| Cast<UParticleSystem>(Object)
 		|| Cast<UParticleLODLevel>(Object)

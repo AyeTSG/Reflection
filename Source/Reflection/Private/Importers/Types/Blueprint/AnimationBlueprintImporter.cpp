@@ -110,8 +110,14 @@ bool IAnimationBlueprintImporter::Import() {
 	}
 
 	if (!AnimBlueprint) {
-		const TSharedPtr<FJsonObject> SuperStruct = GetAssetData()->GetObjectField(TEXT("SuperStruct"));
-		UClass* ParentClass = LoadClass(SuperStruct);
+		/* Where it says it comes from, asked for the way everything else asks. */
+		TSharedPtr<FJsonObject> Comes = GetSuperStructJsonObject(GetAssetData());
+
+		if (!Comes.IsValid()) {
+			Comes = GetSuperStructJsonObject(GetAssetExport());
+		}
+
+		UClass* ParentClass = Comes.IsValid() ? LoadClass(Comes) : nullptr;
 
 		/* An animation blueprint is built on the class it was written against, and a build without
 		 * that class has nothing to build it on. Making one anyway is asked of the engine, which
@@ -140,7 +146,7 @@ bool IAnimationBlueprintImporter::Import() {
 	/* The variables the blueprint declares have to exist before the class default object below can
 	 * put anything in them. ChildProperties holds them alongside the anim graph node state, which
 	 * FBlueprintVariables filters out. */
-	if (FBlueprintVariables::Construct(AnimBlueprint, FBlueprintVariables::GetDeclared(GetAssetExport(), GetContainer())) > 0) {
+	if (FBlueprintVariables::Construct(AnimBlueprint, FBlueprintVariables::GetDeclared(GetAssetExport(), GetContainer()), GetContainer()) > 0) {
 		/* The properties only appear on the generated class once it recompiles */
 		CompileBlueprintGuarded(AnimBlueprint, EBlueprintCompileOptions::SkipGarbageCollection);
 	}

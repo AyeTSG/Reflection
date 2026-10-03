@@ -271,13 +271,22 @@ bool FBlueprintVariables::IsUserVariable(const TSharedPtr<FJsonObject>& Property
 	return Flags.Contains(TEXT("Edit")) || Flags.Contains(TEXT("BlueprintVisible"));
 }
 
-bool FBlueprintVariables::GetPinType(const TSharedPtr<FJsonObject>& Property, FEdGraphPinType& OutPinType) {
+bool FBlueprintVariables::GetPinType(const TSharedPtr<FJsonObject>& Property, FEdGraphPinType& OutPinType, FUObjectExportContainer* Container) {
 	if (!Property.IsValid()) {
 		return false;
 	}
 
 	FString Type;
 	if (!Property->TryGetStringField(TEXT("Type"), Type)) {
+		/* Named from elsewhere in the asset rather than written out where it is used */
+		if (Container != nullptr) {
+			const FUObjectExport* Held = Container->GetExportByObjectPath(Property);
+
+			if (Held != nullptr && Held->IsJsonValid() && Held->JsonObject != Property) {
+				return GetPinType(Held->JsonObject, OutPinType, Container);
+			}
+		}
+
 		return false;
 	}
 
@@ -286,7 +295,7 @@ bool FBlueprintVariables::GetPinType(const TSharedPtr<FJsonObject>& Property, FE
 	const TSharedPtr<FJsonObject>* Element = nullptr;
 
 	if (Type == TEXT("ArrayProperty") && Property->TryGetObjectField(TEXT("Inner"), Element)) {
-		if (!GetPinType(*Element, OutPinType)) return false;
+		if (!GetPinType(*Element, OutPinType, Container)) return false;
 
 		OutPinType.ContainerType = EPinContainerType::Array;
 
@@ -294,7 +303,7 @@ bool FBlueprintVariables::GetPinType(const TSharedPtr<FJsonObject>& Property, FE
 	}
 
 	if (Type == TEXT("SetProperty") && Property->TryGetObjectField(TEXT("ElementProp"), Element)) {
-		if (!GetPinType(*Element, OutPinType)) return false;
+		if (!GetPinType(*Element, OutPinType, Container)) return false;
 
 		OutPinType.ContainerType = EPinContainerType::Set;
 
@@ -309,8 +318,8 @@ bool FBlueprintVariables::GetPinType(const TSharedPtr<FJsonObject>& Property, FE
 
 		FEdGraphPinType ValuePinType;
 
-		if (!GetPinType(*Element, OutPinType)) return false;
-		if (!GetPinType(*ValueProperty, ValuePinType)) return false;
+		if (!GetPinType(*Element, OutPinType, Container)) return false;
+		if (!GetPinType(*ValueProperty, ValuePinType, Container)) return false;
 
 		OutPinType.ContainerType = EPinContainerType::Map;
 		OutPinType.PinValueType = FEdGraphTerminalType::FromPinType(ValuePinType);
@@ -375,7 +384,7 @@ bool FBlueprintVariables::GetPinType(const TSharedPtr<FJsonObject>& Property, FE
 	return false;
 }
 
-int32 FBlueprintVariables::Construct(UBlueprint* Blueprint, const TArray<TSharedPtr<FJsonValue>>& ChildProperties) {
+int32 FBlueprintVariables::Construct(UBlueprint* Blueprint, const TArray<TSharedPtr<FJsonValue>>& ChildProperties, FUObjectExportContainer* Container) {
 	if (Blueprint == nullptr) {
 		return 0;
 	}
@@ -407,7 +416,7 @@ int32 FBlueprintVariables::Construct(UBlueprint* Blueprint, const TArray<TShared
 		}
 
 		FEdGraphPinType PinType;
-		if (!GetPinType(Property, PinType)) {
+		if (!GetPinType(Property, PinType, Container)) {
 			FString Type;
 			Property->TryGetStringField(TEXT("Type"), Type);
 

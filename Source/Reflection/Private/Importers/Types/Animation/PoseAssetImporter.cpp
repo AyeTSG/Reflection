@@ -20,6 +20,79 @@
 #include "Modules/Cloud/Remote.h"
 #include "Utilities/JsonHelpers.h"
 
+#if !UE5_3_BEYOND
+namespace {
+	/* One of the container's own lists, which it keeps to itself */
+	FScriptArrayHelper* ListIn(UPoseAsset* PoseAsset, const TCHAR* Called, TUniquePtr<FScriptArrayHelper>& Held) {
+		const FStructProperty* Container = FindFProperty<FStructProperty>(UPoseAsset::StaticClass(), TEXT("PoseContainer"));
+
+		if (Container == nullptr) return nullptr;
+
+		void* Inside = Container->ContainerPtrToValuePtr<void>(PoseAsset);
+		FArrayProperty* List = FindFProperty<FArrayProperty>(Container->Struct, Called);
+
+		if (List == nullptr) return nullptr;
+
+		Held = MakeUnique<FScriptArrayHelper>(List, List->ContainerPtrToValuePtr<void>(Inside));
+
+		return Held.Get();
+	}
+
+	/* The names a pose is found by, put where this engine keeps them. */
+	void NameThePoses(UPoseAsset* PoseAsset, USkeleton* Skeleton, const TSharedPtr<FJsonObject>& PoseContainer) {
+		if (PoseAsset == nullptr || Skeleton == nullptr || !PoseContainer.IsValid()) return;
+
+		const auto Registered = [Skeleton](const FString& Called) {
+			FSmartName Name;
+
+			Skeleton->AddSmartNameAndModify(USkeleton::AnimCurveMappingName, FName(*Called), Name);
+
+			return Name;
+		};
+
+		TUniquePtr<FScriptArrayHelper> Held;
+
+		/* What each pose is called */
+		if (const TArray<TSharedPtr<FJsonValue>>* Named = nullptr; PoseContainer->TryGetArrayField(TEXT("PoseFNames"), Named)) {
+			if (FScriptArrayHelper* Names = ListIn(PoseAsset, TEXT("PoseNames"), Held)) {
+				Names->Resize(Named->Num());
+
+				for (int32 Index = 0; Index < Named->Num(); ++Index) {
+					*reinterpret_cast<FSmartName*>(Names->GetRawPtr(Index)) = Registered((*Named)[Index]->AsString());
+				}
+			}
+		}
+
+		/* And the curve that drives it, which is named separately and has to agree */
+		if (const TArray<TSharedPtr<FJsonValue>>* Written = nullptr; PoseContainer->TryGetArrayField(TEXT("Curves"), Written)) {
+			if (FScriptArrayHelper* Curves = ListIn(PoseAsset, TEXT("Curves"), Held)) {
+				Curves->Resize(Written->Num());
+
+				for (int32 Index = 0; Index < Written->Num(); ++Index) {
+					const TSharedPtr<FJsonObject> One = (*Written)[Index].IsValid() ? (*Written)[Index]->AsObject() : nullptr;
+
+					if (!One.IsValid()) continue;
+
+					FAnimCurveBase& Curve = *reinterpret_cast<FAnimCurveBase*>(Curves->GetRawPtr(Index));
+
+					FString Called;
+
+					if (One->TryGetStringField(TEXT("CurveName"), Called)) {
+						Curve.Name = Registered(Called);
+					}
+
+					if (int32 Flags = 0; One->TryGetNumberField(TEXT("CurveTypeFlags"), Flags)) {
+						Curve.SetCurveTypeFlags(Flags);
+					}
+				}
+			}
+		}
+
+		Skeleton->Modify(true);
+	}
+}
+#endif
+
 UObject* IPoseAssetImporter::CreateAsset(UObject* CreatedAsset) {
 	return IImporter::CreateAsset(NewObject<UPoseAsset>(GetPackage(), UPoseAsset::StaticClass(), *GetAssetName(), RF_Standalone | RF_Public));
 }
@@ -39,6 +112,12 @@ bool IPoseAssetImporter::Import() {
 
 	/* Final operation to set properties */
 	GetObjectSerializer()->DeserializeObjectProperties(GetAssetData(), PoseAsset);
+
+#if !UE5_3_BEYOND
+	if (GetAssetData()->HasField(TEXT("PoseContainer"))) {
+		NameThePoses(PoseAsset, PoseAsset->GetSkeleton(), GetAssetData()->GetObjectField(TEXT("PoseContainer")));
+	}
+#endif
 
 	/* If the user wants to specify a pose asset animation */
 	if (UAnimSequence* OptionalAnimationSequence = GetSelectedAsset<UAnimSequence>(true)) {
@@ -253,7 +332,10 @@ void IPoseAssetImporter::ReverseCookLocalSpacePose(USkeleton* Skeleton) {
 	}
 
 	const FString PotentialAnimSequencePath = ParentPath / CleanName;
-	if (FPackageName::DoesPackageExist(PotentialAnimSequencePath)) {
+
+	/* Taken already, whether or not anything has been written out. */
+	if (FPackageName::DoesPackageExist(PotentialAnimSequencePath)
+		|| FindObject<UObject>(nullptr, *(PotentialAnimSequencePath + TEXT(".") + CleanName)) != nullptr) {
 		CleanName = GetAssetName() + "_Pose_Export";
 	}
 	
