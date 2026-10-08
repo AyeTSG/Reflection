@@ -7,6 +7,7 @@
 
 /* Settings Substructures */
 #include "Types/AnimationBlueprintSettings.h"
+#include "Types/LevelSettings.h"
 #include "Types/MeshSettings.h"
 #include "Types/TextureSettings.h"
 #include "Redirector.h"
@@ -62,6 +63,14 @@ public:
 
 	UPROPERTY(EditAnywhere, Config, Category = Settings)
 	bool SaveAssets = false;
+
+	/* Whether what an asset names is fetched along with it. Off, references are left to whatever the project has. */
+	UPROPERTY(EditAnywhere, DisplayName = "Import References", Config, Category = Settings)
+	bool ImportReferences = true;
+
+	/* Whether a blueprint gets its graphs. Off, everything else about it comes across and the graphs are left empty. */
+	UPROPERTY(EditAnywhere, DisplayName = "Import Blueprint Code", Config, Category = Settings)
+	bool ImportBlueprintCode = true;
 };
 
 /* Reconstruction Toolkit for Unreal Engine */
@@ -84,6 +93,10 @@ public:
 
 	UPROPERTY(EditAnywhere, Config, Category = Settings)
 	FRSettings AssetSettings;
+
+	/* Reading a level, which is experimental: what it places and what it leaves alone */
+	UPROPERTY(EditAnywhere, DisplayName = "Level", Config, Category = Settings, meta = (EditCondition = "EnableExperiments"))
+	FRLevelSettings Level;
 
 	/* On, the reflect button opens a file dialog and imports a json you exported yourself. Off, it
 	 * asks for an asset path and pulls the data from Cloud. */

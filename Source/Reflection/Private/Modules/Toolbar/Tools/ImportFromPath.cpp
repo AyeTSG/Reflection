@@ -6,6 +6,8 @@
 #include "Importers/Constructor/ImportIssues.h"
 #include "Importers/Constructor/ImportReader.h"
 #include "Importers/Types/Texture/TextureImporter.h"
+#include "Importers/Types/World/LevelRead.h"
+#include "Importers/Types/World/LevelRead.h"
 #include "Importers/Types/Texture/TextureTypes.h"
 #include "Modules/Cloud/Cloud.h"
 #include "Modules/Cloud/Remote.h"
@@ -22,9 +24,8 @@ void TToolImportFromPath::Execute() {
 	}
 
 	/* Nothing here goes through the reflect button, so this is where the project name gets fetched */
+	/* Cancelled, which is the reader saying they are done waiting */
 	if (!Cloud::EnsureMetadataBlocking()) {
-		SpawnPrompt("Reflection", "Cloud didn't say which project it has loaded, so paths can't be resolved.");
-
 		return;
 	}
 
@@ -160,6 +161,11 @@ bool TToolImportFromPath::Import(const FString& InPath, const TSet<FString>& All
 		}
 
 		return false;
+	}
+
+	/* A level, which reads into the open level rather than into a package of its own */
+	if (FLevelRead::Handles(Exports)) {
+		return FLevelRead::FromCloud(Exports, PackagePath);
 	}
 
 	if (FTextureTypes::IsSupported(Type)) {

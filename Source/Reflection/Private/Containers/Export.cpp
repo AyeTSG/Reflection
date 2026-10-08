@@ -4,6 +4,7 @@
 #include "Engine/EngineUtilities.h"
 #include "Settings/Runtime.h"
 #include "Importers/Types/Blueprint/BlueprintUtilities.h"
+#include "Importers/Constructor/Importer.h"
 
 FString ReadPathFromObject(const FUObjectJsonValueExport& PackageIndex) {
 	FString ObjectType, ObjectName, ObjectPath, Outer;
@@ -76,7 +77,8 @@ UClass* FUObjectExport::GetClass() {
 		 *
 		 * It reaches as far as it needs to, since what comes in is read the same way and asks for
 		 * whatever it is made of. */
-		if (!OutClass && TToolImportFromPath::Import(Asset)) {
+		/* And only where the project has not got it: a blueprint with an error reads as missing every time, and fetching writes over it */
+		if (!OutClass && !PackageHoldsAsset(Asset) && TToolImportFromPath::Import(Asset)) {
 			OutClass = LoadBlueprintClass(Asset);
 		}
 	}

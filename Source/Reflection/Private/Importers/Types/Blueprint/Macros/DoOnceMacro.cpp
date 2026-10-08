@@ -99,6 +99,20 @@ struct FDoOnceMacro final : FMacroPattern {
 			Out.Internal.Add(Which);
 		}
 
+		/* And whoever opens it again: Reset puts the closed local back down, and the run arriving there is what was wired to it */
+		for (int32 Look = 0; Look < Statements.Num(); ++Look) {
+			if (Out.Internal.Contains(Look) || !IsLet(TokenOf(Statements[Look]))) continue;
+
+			if (WrittenTo(Statements[Look]) != Shut) continue;
+			if (TokenOf(Statements[Look].GetObject(TEXT("Expression"))) != TEXT("EX_False")) continue;
+
+			Out.Takes.Add(Look, TEXT("Reset"));
+
+			Out.Internal.Add(Look);
+
+			break;
+		}
+
 		/* Placed where the run reaches it, which is the sequence it begins with */
 		Out.First = At;
 		Out.Last = At;

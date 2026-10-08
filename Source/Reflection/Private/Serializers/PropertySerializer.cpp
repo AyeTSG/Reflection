@@ -46,6 +46,18 @@ namespace {
 
 		return PackageFileOf(Reference.GetLongPackageName(), Held);
 	}
+
+	/* The components being filled in right now, innermost last. */
+	TArray<UObject*> GBeingFilled;
+
+	/* Marks one as being filled for as long as the call filling it is running. */
+	struct FFillScope {
+		explicit FFillScope(UObject* InObject) : Object(InObject) { GBeingFilled.Add(Object); }
+
+		~FFillScope() { GBeingFilled.Remove(Object); }
+
+		UObject* Object;
+	};
 }
 
 /* A tag the game had and this project has not. */
@@ -524,6 +536,28 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 
 			TObjectPtr<UObject> Points = LoadObjectByPath<UObject>(Where);
 
+			/* Something this package holds, which the loader cannot read yet and the Cloud answers with the same file */
+			if (Points == nullptr && ExportsContainer != nullptr && Named.Contains(TEXT(":"))) {
+				FString Leaf;
+
+				if (!Named.Split(TEXT(":"), nullptr, &Leaf, ESearchCase::CaseSensitive, ESearchDir::FromEnd)) {
+					Leaf = Named;
+				}
+
+				/* Only the last segment names the export, whatever it is kept under */
+				if (FString Deeper; Leaf.Split(TEXT("."), nullptr, &Deeper, ESearchCase::CaseSensitive, ESearchDir::FromEnd)) {
+					Leaf = Deeper;
+				}
+
+				if (FUObjectExport* Held = ExportsContainer->Find(Leaf); Held != nullptr && Held->IsJsonValid()) {
+					if (Held->Object == nullptr && ObjectSerializer != nullptr) {
+						ObjectSerializer->SpawnExport(Held);
+					}
+
+					Points = Held->Object;
+				}
+			}
+
 			/* Only the game has it, and nothing under Script is ever fetched */
 			if (Points == nullptr && !Named.StartsWith(TEXT("/Script/"))) {
 				FString PackagePath;
@@ -550,6 +584,13 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 
 		if (NewJsonValue->Type == EJson::Object) {
 			auto JsonValueAsObject = NewJsonValue->AsObject();
+
+			/* What is being filled in, which importing a blueprint recompiles and throws away underneath this */
+			UObject* const Into = OptionalOuter != nullptr
+				? OptionalOuter
+				: (ObjectSerializer != nullptr ? ObjectSerializer->Parent : nullptr);
+
+			const TWeakObjectPtr<UObject> Filling(Into);
 
 			/* Something of this package's own, asked for by the whole way down to it.
 			 *
@@ -589,7 +630,22 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 
 			if (!Object) Importer->LoadExport(&JsonValueAsObject, Object);
 
-			if (UObject* CurrentObject = ObjectProperty->GetObjectPropertyValue(OutValue)) {
+			/* Taken apart while that ran, so the rest of this is written nowhere */
+			if (Into != nullptr && !Filling.IsValid()) {
+				UE_LOG(LogReflectionPropertySerializer, Warning, TEXT("\"%s\" was being read into something an import took apart, and was left"),
+					*GetPropertyName(Property).ToString());
+
+				return;
+			}
+
+			/* Whatever it holds may point at something taken apart since, which answers a null check and then crashes */
+			UObject* CurrentObject = ObjectProperty->GetObjectPropertyValue(OutValue);
+
+			if (CurrentObject != nullptr && (!CurrentObject->IsValidLowLevelFast() || !IsValid(CurrentObject))) {
+				CurrentObject = nullptr;
+			}
+
+			if (CurrentObject != nullptr) {
 				if (!Object && CurrentObject->IsA(UActorComponent::StaticClass())) {
 					Object = CurrentObject;
 				}
@@ -620,8 +676,10 @@ void UPropertySerializer::DeserializePropertyValue(FProperty* Property, const TS
 					SetObjectPropertyValueChecked(ObjectProperty, OutValue, Object);
 				}
 
-				/* And filled in, since what it is made of is written where it is named */
-				if (bIsActorComponent && GetPropertyName(ObjectProperty) != "AttachParent") {
+				/* And filled in, but not while the first is still running: two components naming each other never stop */
+				if (bIsActorComponent && GetPropertyName(ObjectProperty) != "AttachParent" && !GBeingFilled.Contains(Object)) {
+					const FFillScope BeingFilled(Object);
+
 					if (FUObjectExport* TargetExport = ExportsContainer->GetExportByObjectPath(JsonValueAsObject)) {
 						FUObjectJsonValueExport Properties = TargetExport->GetObject(TEXT("Properties"));
 

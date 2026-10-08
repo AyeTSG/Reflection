@@ -24,6 +24,9 @@ namespace {
 		FString Type;
 		FString Name;
 		FString Path;
+
+		/* How the reference spelled it, where what it names is kept inside an asset */
+		FString Within;
 	};
 
 	TArray<FPendingReference> GPending;
@@ -48,6 +51,11 @@ namespace {
 	}
 
 	bool ReferenceResolves(const FPendingReference& Pending) {
+		/* Under the name it is kept under, which is the only one that finds it */
+		if (!Pending.Within.IsEmpty() && ResolvesAt(Pending.Path + TEXT(".") + Pending.Within)) {
+			return true;
+		}
+
 		if (ResolvesAt(Pending.Path + TEXT(".") + Pending.Name)) {
 			return true;
 		}
@@ -119,13 +127,20 @@ void FImportIssues::Finish() {
 			continue;
 		}
 
+		/* A class is compiled into the build, so one this engine hasn't got is missing rather than unfetched */
+		const bool bNative = Pending.Path.StartsWith(TEXT("/Script/"));
+
 		ReportFor(
 			Pending.AssetName,
 			Pending.AssetPath,
 			Pending.AssetType,
-			EImportIssue::MissingAsset,
-			TEXT("Couldn't resolve ") + Pending.Name,
-			Pending.Type + TEXT(" at ") + Pending.Path
+			bNative ? EImportIssue::MissingClass : EImportIssue::MissingAsset,
+			bNative
+				? FString::Printf(TEXT("This engine has no %s"), *Pending.Name)
+				: TEXT("Couldn't resolve ") + Pending.Name,
+			bNative
+				? FString::Printf(TEXT("%s is compiled into %s rather than stored as an asset, so nothing can fetch it."), *Pending.Name, *Pending.Path)
+				: Pending.Type + TEXT(" at ") + Pending.Path
 		);
 	}
 
@@ -191,7 +206,7 @@ void FImportIssues::ReportFor(const FString& Name, const FString& Path, const FS
 }
 
 /* An asset's own exports come through here unresolved too, so nothing is reported until the end */
-void FImportIssues::ReportUnresolvedReference(const FString& Type, const FString& Name, const FString& Path) {
+void FImportIssues::ReportUnresolvedReference(const FString& Type, const FString& Name, const FString& Path, const FString& Within) {
 	if (Name.IsEmpty()) {
 		return;
 	}
@@ -229,6 +244,7 @@ void FImportIssues::ReportUnresolvedReference(const FString& Type, const FString
 	Pending.Type = Type;
 	Pending.Name = Name;
 	Pending.Path = Path;
+	Pending.Within = Within;
 
 	/* Held until the run ends, where whether it resolved is a question with an answer */
 	GPending.Add(Pending);

@@ -12,6 +12,7 @@
 
 #include "Importers/Constructor/ImportReader.h"
 #include "Importers/Constructor/Importer.h"
+#include "Importers/Types/World/LevelRead.h"
 #include "Modules/Cloud/Cloud.h"
 /* 5.0 gathered what a save is told into a header of its own */
 #if ENGINE_UE5
@@ -89,6 +90,35 @@ int32 UReflectImportCommandlet::Main(const FString& Params) {
 		if (FJsonSerializer::Serialize(Response.ToSharedRef(), Writer) && FFileHelper::SaveStringToFile(Written, *Dump)) {
 			UE_LOG(LogReflectImport, Display, TEXT("what the cloud gave back was kept at \"%s\""), *Dump);
 		}
+	}
+
+	/* A level writes no package, so there is nothing below for it to say anything about */
+	if (FLevelRead::Handles(Exports)) {
+		FRLevelReadResult Result;
+
+		if (!FLevelRead::FromCloud(Exports, Path, &Result)) {
+			UE_LOG(LogReflectImport, Error, TEXT("nothing was read from \"%s\""), *Path);
+
+			return 1;
+		}
+
+		UE_LOG(LogReflectImport, Display, TEXT("%d placed, %d missing (%d blueprint, %d class, %d refused), %d left out"),
+			Result.Placed, Result.Missing(), Result.MissingBlueprints, Result.UnusableClasses, Result.Failed, Result.LeftOut);
+
+		/* Said out loud: headless there is no window for the report to come up in */
+		for (const TSharedPtr<FImportIssueAsset>& Asset : FImportIssues::GetAssets()) {
+			UE_LOG(LogReflectImport, Display, TEXT("  %s"), *Asset->Name);
+
+			for (const TSharedPtr<FImportIssue>& Issue : Asset->Issues) {
+				UE_LOG(LogReflectImport, Display, TEXT("    [%s] %s%s%s"),
+					*GetImportIssueText(Issue->Kind).ToString(),
+					*Issue->Summary,
+					Issue->Count > 1 ? *FString::Printf(TEXT(" (x%d)"), Issue->Count) : TEXT(""),
+					Issue->Detail.IsEmpty() ? TEXT("") : *(TEXT(": ") + Issue->Detail));
+			}
+		}
+
+		return 0;
 	}
 
 	IImporter* Importer = nullptr;

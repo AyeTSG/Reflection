@@ -204,9 +204,8 @@ void UReflectionToolbar::RegisterAssetContextMenu() {
 			/* And reached without going through either reflect tool, so the project name the
 			 * exports are resolved against is fetched here too. Asked once for the press rather
 			 * than once for each asset, since the answer is the same either way. */
+			/* Cancelled, which is the reader saying they are done waiting */
 			if (!Cloud::EnsureMetadataBlocking()) {
-				SpawnPrompt("Reflection", "Cloud didn't say which project it has loaded, so paths can't be resolved.");
-
 				return;
 			}
 

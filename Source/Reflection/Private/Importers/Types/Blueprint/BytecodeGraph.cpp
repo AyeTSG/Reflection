@@ -198,7 +198,10 @@ namespace {
 			OutType.PinCategory = UEdGraphSchema_K2::PC_Object;
 			OutType.PinSubCategoryObject = Class;
 		}
-		else return false;
+		else {
+			/* Asked of the one that declares the blueprint's own variables, which knows the kinds this does not */
+			return Property.JsonObject.IsValid() && FBlueprintVariables::GetPinType(Property.JsonObject, OutType, Container);
+		}
 
 		return true;
 	}
@@ -472,6 +475,29 @@ FString FBytecodeGraph::SpellValue(const FProperty* Property, const FUObjectJson
 	const FString Token = MacroReading::TokenOf(Expression);
 
 	if (Token == TEXT("EX_StructConst")) return ReadStructConst(Expression);
+
+	/* Spelled rather than built: read as an expression an array comes back as a node and a pin, and a struct member wants a default */
+	if (Token == TEXT("EX_ArrayConst")) {
+		const TArray<FUObjectJsonValueExport> Values = Expression.Has(TEXT("Values"))
+			? Expression.GetArray(TEXT("Values"))
+			: TArray<FUObjectJsonValueExport>();
+
+		const FArrayProperty* Holds = CastField<FArrayProperty>(Property);
+
+		TArray<FString> Each;
+		Each.Reserve(Values.Num());
+
+		for (const FUObjectJsonValueExport& Held : Values) {
+			FString Said = SpellValue(Holds != nullptr ? Holds->Inner : nullptr, Held);
+
+			/* An element that cannot be spelled still takes its place, or the rest shuffle up into it */
+			if (Said.IsEmpty()) Said = TEXT("()");
+
+			Each.Add(Said);
+		}
+
+		return TEXT("(") + FString::Join(Each, TEXT(",")) + TEXT(")");
+	}
 
 	/* Spelled the way a struct writes a member out rather than the way a pin carries one. A pin
 	 * says where and which way round as its numbers alone; a struct names them. */
@@ -4683,6 +4709,53 @@ int32 FBytecodeGraph::Build() {
 
 	if (Idle > 0) {
 		UE_LOG(LogReflectionBytecode, Display, TEXT("\"%s\": %d node(s) worked something out for nobody, and were left out"), *Graph->GetName(), Idle);
+	}
+
+	/* The ways out nothing reaches, one Return per branch. One is kept, or a function with outputs will not compile. */
+	{
+		TArray<UK2Node_FunctionResult*> Answering;
+
+		for (UEdGraphNode* Node : Graph->Nodes) {
+			if (UK2Node_FunctionResult* Out = Cast<UK2Node_FunctionResult>(Node)) Answering.Add(Out);
+		}
+
+		const auto bReached = [](const UK2Node_FunctionResult* Out) {
+			for (const UEdGraphPin* Pin : Out->Pins) {
+				if (Pin == nullptr || Pin->Direction != EGPD_Input) continue;
+				if (Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec) continue;
+
+				if (Pin->LinkedTo.Num() > 0) return true;
+			}
+
+			return false;
+		};
+
+		int32 Kept = 0;
+
+		for (const UK2Node_FunctionResult* Out : Answering) {
+			if (bReached(Out)) Kept++;
+		}
+
+		int32 Dropped = 0;
+
+		for (UK2Node_FunctionResult* Out : Answering) {
+			if (bReached(Out)) continue;
+
+			/* Nothing reaches any of them, so the first stands as the one the function answers through */
+			if (Kept == 0) {
+				Kept++;
+
+				continue;
+			}
+
+			Graph->RemoveNode(Out);
+
+			Dropped++;
+		}
+
+		if (Dropped > 0) {
+			UE_LOG(LogReflectionBytecode, Display, TEXT("\"%s\": %d way(s) out that nothing reaches, and were left out"), *Graph->GetName(), Dropped);
+		}
 	}
 
 	UE_LOG(LogReflectionBytecode, Display, TEXT("\"%s\": entered from %s, %d node(s) chained, %d left out of the run"), *Graph->GetName(), Flow != nullptr ? TEXT("a pin") : TEXT("nothing"), Chained, Orphaned);

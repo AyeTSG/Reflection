@@ -23,6 +23,7 @@
 #include "Kismet2/KismetEditorUtilities.h"
 
 #include "Engine/SCS_Node.h"
+#include "Engine/LevelScriptActor.h"
 #include "Engine/InheritableComponentHandler.h"
 #include "Importers/Types/Blueprint/BlueprintUtilities.h"
 #include "Importers/Types/Blueprint/BlueprintVariables.h"
@@ -31,6 +32,7 @@
 #include "Engine/TimelineTemplate.h"
 #include "Importers/Types/Blueprint/BlueprintCookedMetaData.h"
 #include "Importers/Types/Blueprint/BytecodeGraph.h"
+#include "Importers/Constructor/TypesHelper.h"
 
 UObject* IBlueprintImporter::CreateAsset(UObject* CreatedAsset) {
 	UClass* Class = GetAssetClass();
@@ -44,7 +46,40 @@ UObject* IBlueprintImporter::CreateAsset(UObject* CreatedAsset) {
 
 		return nullptr;
 	}
+
+	/* There by name and not by anything else: building on an unfinished parent asserts as the default object is made */
+	if (!ClassIsFormed(Class)) {
+		FImportIssues::Report(
+			EImportIssue::MissingClass,
+			FString::Printf(TEXT("Nothing was made of the parent class %s"), *Class->GetName()),
+			TEXT("Its class is in memory but was never finished, most often because the blueprint above this one did not come across. Building on it would stop the editor, so nothing was made for this one.")
+		);
+
+		return nullptr;
+	}
 	
+	/* A level's own script belongs to the map, which already holds that name: made here it stops the editor */
+	if (Class->IsChildOf(ALevelScriptActor::StaticClass())) {
+		FImportIssues::Report(
+			EImportIssue::Data,
+			FString::Printf(TEXT("\"%s\" is a level's own script"), *GetAssetName()),
+			TEXT("A level script is part of the map it was written in rather than an asset of its own, and the map already holds that name. Nothing was made for it, and whatever named it carried on.")
+		);
+
+		return nullptr;
+	}
+
+	/* Or a name something else answers to: reused where it is a blueprint, and nowhere to put this one where it is not */
+	if (const UObject* Standing = FindObject<UObject>(GetPackage(), *GetAssetName()); Standing != nullptr && !Standing->IsA<UBlueprint>()) {
+		FImportIssues::Report(
+			EImportIssue::Failed,
+			FString::Printf(TEXT("\"%s\" is already taken"), *GetAssetName()),
+			FString::Printf(TEXT("Something of that name is already in the package and it is a %s rather than a blueprint, so a blueprint cannot be made there. Rename or delete it before reflecting."), *Standing->GetClass()->GetName())
+		);
+
+		return nullptr;
+	}
+
 	/* Find the blueprint class and generated class */
 	UClass* BlueprintClass = nullptr, *GeneratedClass = nullptr;
 	
@@ -252,7 +287,14 @@ int32 IBlueprintImporter::ConstructBody() {
 		UE_LOG(LogReflection, Display, TEXT("%d timeline(s) rebuilt"), Timelines);
 	}
 
-	const int32 Laid = ConstructGraphs();
+	/* What the blueprint does rather than what it is, and the one part read back from bytecode rather than copied */
+	const int32 Laid = GetSettings()->AssetSettings.ImportBlueprintCode ? ConstructGraphs() : 0;
+
+	if (!GetSettings()->AssetSettings.ImportBlueprintCode) {
+		FImportIssues::Report(EImportIssue::Setting,
+			TEXT("The graphs were left empty"),
+			TEXT("Import Blueprint Code is off, so what the blueprint does was not read back. Everything else about it came across."));
+	}
 
 	/* What survived, counted where it matters rather than where it was made */
 	if (const UEdGraph* Events = FBlueprintGraphs::Events(Blueprint)) {

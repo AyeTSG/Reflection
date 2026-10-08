@@ -577,10 +577,22 @@ void UObjectSerializer::DeserializeObjectProperties(const TSharedPtr<FJsonObject
 
 	const UClass* ObjectClass = Object->GetClass();
 
+	/* Watched rather than trusted: reading one property can fetch, compile, and take this object apart underneath the loop */
+	const TWeakObjectPtr<UObject> Alive(Object);
+
 	for (FProperty* Property = ObjectClass->PropertyLink; Property; Property = Property->PropertyLinkNext) {
+		if (!Property->IsValidLowLevel()) continue;
+		
 		FString PropertyName = Property->GetName();
 
 		if (!PropertySerializer->ShouldDeserializeProperty(Property)) continue;
+
+		/* Gone while something further in was being read, so there is nothing left to read into */
+		if (!Alive.IsValid()) {
+			UE_LOG(LogReflection, Warning, TEXT("\"%s\" was taken apart while its properties were being read, and the rest were left"), *ObjectClass->GetName());
+
+			return;
+		}
 
 		void* PropertyValue = Property->ContainerPtrToValuePtr<void>(Object);
 		const bool HasHandledProperty = PassthroughPropertyHandler(Property, PropertyName, PropertyValue, Properties, PropertySerializer);

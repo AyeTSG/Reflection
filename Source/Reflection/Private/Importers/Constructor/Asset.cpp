@@ -15,6 +15,7 @@
 #include "Engine/SubsurfaceProfile.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "Settings/ReflectionSettings.h"
+#include "Settings/SettingsAccess.h"
 #include "Dom/JsonObject.h"
 
 #include "Engine/FontFace.h"
@@ -276,7 +277,8 @@ bool FAssetUtilities::ConstructAsset(const FString& Path, const FString& RealPat
 	 * The asset itself exists by this point, since it is created before its graph is filled in, so
 	 * what is in memory is what the reference wants. It is handed back half built and the import
 	 * that owns it finishes it. */
-	if (!bImportReferences && Type != TEXT("Skeleton")) {
+	/* The switch is for a run that turns them off, the setting for somebody who wants only what they asked for */
+	if ((!bImportReferences || !GetSettings()->AssetSettings.ImportReferences) && Type != TEXT("Skeleton")) {
 		return false;
 	}
 

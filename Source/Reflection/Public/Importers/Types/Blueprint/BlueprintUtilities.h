@@ -120,6 +120,13 @@ inline TSubclassOf<UObject> LoadBlueprintClass(FString& ObjectPath) {
 		if (LoadedBlueprint && LoadedBlueprint->GeneratedClass) {
 			return LoadedBlueprint->GeneratedClass;
 		}
+
+		/* The class it generated, where the blueprint cannot say: answering nothing reads as an asset the project has not got */
+		if (FString Leaf = FullPath; Leaf.Split(TEXT("/"), nullptr, &Leaf, ESearchCase::CaseSensitive, ESearchDir::FromEnd)) {
+			if (UClass* Generated = LoadObjectByPath<UClass>(FullPath + TEXT(".") + Leaf + TEXT("_C"))) {
+				return Generated;
+			}
+		}
 	}
 
 	return nullptr;
@@ -150,7 +157,10 @@ inline UClass* LoadClass(const TSharedPtr<FJsonObject>& SuperStruct) {
 	 * It reaches back as far as it needs to. A parent that is itself a blueprint asks for its own
 	 * parent as it is read, and the chain ends where it meets a class written in C++, which is
 	 * already here and never asked for. */
-	if (TToolImportFromPath::Import(ObjectPath)) {
+	/* Only where the project has not got it: one that is here and did not answer is written over every time anything names it */
+	FString Held;
+
+	if (!PackageHoldsAsset(ObjectPath) && TToolImportFromPath::Import(ObjectPath)) {
 		return LoadBlueprintClass(ObjectPath);
 	}
 
