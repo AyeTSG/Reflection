@@ -238,9 +238,9 @@ UWorld* FLevelRead::LevelFor(UPackage* Package) const {
 		.CreateAISystem(false);
 
 
-	// [linux]	This overload of CreateWorld does not exist under Linux.
+	// [4.26]	This overload of CreateWorld does not exist under 4.26.
 
-	#if !PLATFORM_LINUX
+	#if !UE4_26
 	/* Named for the asset, and not rooted: a rooted world is still standing when its own level is opened */
 	UWorld* Made = UWorld::CreateWorld(EWorldType::Inactive, false, FName(*FPackageName::GetShortName(Package)),
 		Package, /* bAddToRoot */ false, ERHIFeatureLevel::Num, &Values);
@@ -339,9 +339,9 @@ void FLevelRead::SubLevelsNamed(const TArray<TSharedPtr<FJsonValue>>& Exports, F
 void FLevelRead::ReadHLODSetup(UWorld* World, const TArray<ALODActor*>& Actors) const {
 	AWorldSettings* Settings = World != nullptr ? World->GetWorldSettings() : nullptr;
 
-	// [linux] 	Under the Clang toolchain, we don't have access to IsEmpty on a TArray.
-	//			Getting Max == 0 *should* return the same functionality under Linux.
-	#if !PLATFORM_LINUX
+	// [4.26] 	Under the 4.26.2 engine, we don't have access to IsEmpty on a TArray.
+	//			Getting Max == 0 *should* return the same functionality.
+	#if !UE4_26
 	if (Settings == nullptr || Actors.IsEmpty()) return;
 	#else
 	if (Settings == nullptr || Actors.Max() == 0) return;
@@ -380,9 +380,9 @@ void FLevelRead::ReadHLODSetup(UWorld* World, const TArray<ALODActor*>& Actors) 
 
 void FLevelRead::ReadHLODs(UWorld* World, const TArray<ALODActor*>& Actors, FRLevelReadResult& Result) const {
 
-	// [linux] 	Under the Clang toolchain, we don't have access to IsEmpty on a TArray.
-	//			Getting Max == 0 *should* return the same functionality under Linux.
-	#if !PLATFORM_LINUX
+	// [4.26] 	Under the 4.26.2 engine, we don't have access to IsEmpty on a TArray.
+	//			Getting Max == 0 *should* return the same functionality.
+	#if !UE4_26
 	if (World == nullptr || Actors.IsEmpty()) return;
 	#else
 	if (World == nullptr || Actors.Max() == 0) return;
@@ -846,9 +846,9 @@ FRLevelReadResult FLevelRead::Read(const TArray<TSharedPtr<FJsonValue>>& Exports
 
 	/* And the levels it brings in, once this one is written: each is a read of its own and reports against itself */
 
-	// [linux] 	Under the Clang toolchain, we don't have access to IsEmpty on a TArray.
-	//			Getting Max == 0 *should* return the same functionality under Linux.
-	#if !PLATFORM_LINUX
+	// [4.26] 	Under the 4.26.2 engine, we don't have access to IsEmpty on a TArray.
+	//			Getting Max == 0 *should* return the same functionality.
+	#if !UE4_26
 	if (!SubLevels.IsEmpty()) {
 	#else
 	if (SubLevels.Max() != 0) {

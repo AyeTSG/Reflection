@@ -24,9 +24,9 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 
-// [linux] 	Clang toolchain doesn't find the UMetaData header on it's own.
+// [4.26] 	4.26 doesn't find the UMetaData header on it's own.
 // 			Let's help it out.
-#if PLATFORM_LINUX
+#if UE4_26
 #include "UObject/MetaData.h"
 #endif
 
