@@ -88,7 +88,14 @@ bool FReflectionSupport::IsQuiet() {
 	if (FBlockingRequestScope::IsActive()) return false;
 
 	/* Something of Reflection's own is already on screen, and nobody is waiting on this one */
+
+	// [linux] 	Under the Clang toolchain, we don't have access to IsEmpty on a TArray.
+	//			Getting Max == 0 *should* return the same functionality under Linux.
+	#if !PLATFORM_LINUX
 	if (NotificationBudget::AtCap() || !NotificationBudget::Live.IsEmpty()) return false;
+	#else
+	if (NotificationBudget::AtCap() || NotificationBudget::Live.Max() != 0) return false;
+	#endif
 
 	/* Nobody in front of the editor to read it */
 	if (!FSlateApplication::IsInitialized() || !FSlateApplication::Get().IsActive()) return false;

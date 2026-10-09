@@ -237,9 +237,18 @@ UWorld* FLevelRead::LevelFor(UPackage* Package) const {
 		.CreateNavigation(false)
 		.CreateAISystem(false);
 
+
+	// [linux]	This overload of CreateWorld does not exist under Linux.
+
+	#if !PLATFORM_LINUX
 	/* Named for the asset, and not rooted: a rooted world is still standing when its own level is opened */
 	UWorld* Made = UWorld::CreateWorld(EWorldType::Inactive, false, FName(*FPackageName::GetShortName(Package)),
 		Package, /* bAddToRoot */ false, ERHIFeatureLevel::Num, &Values);
+	#else
+	UWorld* Made = UWorld::CreateWorld(EWorldType::Inactive, false, FName(*FPackageName::GetShortName(Package)),
+		Package, /* bAddToRoot */ false, ERHIFeatureLevel::Num);
+	#endif
+	
 
 	if (Made != nullptr) {
 		/* Standalone, or nothing points at it: the save drops it and a collection takes it */
@@ -330,7 +339,13 @@ void FLevelRead::SubLevelsNamed(const TArray<TSharedPtr<FJsonValue>>& Exports, F
 void FLevelRead::ReadHLODSetup(UWorld* World, const TArray<ALODActor*>& Actors) const {
 	AWorldSettings* Settings = World != nullptr ? World->GetWorldSettings() : nullptr;
 
+	// [linux] 	Under the Clang toolchain, we don't have access to IsEmpty on a TArray.
+	//			Getting Max == 0 *should* return the same functionality under Linux.
+	#if !PLATFORM_LINUX
 	if (Settings == nullptr || Actors.IsEmpty()) return;
+	#else
+	if (Settings == nullptr || Actors.Max() == 0) return;
+	#endif
 
 	/* As many levels as the actors say, rather than guessed: each carries the one it belongs to */
 	int32 Levels = 0;
@@ -364,7 +379,14 @@ void FLevelRead::ReadHLODSetup(UWorld* World, const TArray<ALODActor*>& Actors) 
 }
 
 void FLevelRead::ReadHLODs(UWorld* World, const TArray<ALODActor*>& Actors, FRLevelReadResult& Result) const {
+
+	// [linux] 	Under the Clang toolchain, we don't have access to IsEmpty on a TArray.
+	//			Getting Max == 0 *should* return the same functionality under Linux.
+	#if !PLATFORM_LINUX
 	if (World == nullptr || Actors.IsEmpty()) return;
+	#else
+	if (World == nullptr || Actors.Max() == 0) return;
+	#endif
 
 	/* Which map the proxy belongs to, which the cook keeps nowhere: it is editor-only, so a proxy
 	 * that came across names no map and every check the editor makes against it fails */
@@ -823,7 +845,14 @@ FRLevelReadResult FLevelRead::Read(const TArray<TSharedPtr<FJsonValue>>& Exports
 	FImportIssues::Pop();
 
 	/* And the levels it brings in, once this one is written: each is a read of its own and reports against itself */
+
+	// [linux] 	Under the Clang toolchain, we don't have access to IsEmpty on a TArray.
+	//			Getting Max == 0 *should* return the same functionality under Linux.
+	#if !PLATFORM_LINUX
 	if (!SubLevels.IsEmpty()) {
+	#else
+	if (SubLevels.Max() != 0) {
+	#endif
 		ReadSubLevels(SubLevels, Result);
 
 		UE_LOG(LogReflection, Display, TEXT("\"%s\" brings in %d level(s): %d read, %d already here, %d could not be"),
