@@ -89,8 +89,8 @@ bool FReflectionSupport::IsQuiet() {
 
 	/* Something of Reflection's own is already on screen, and nobody is waiting on this one */
 
-	// [4.26] 	Under the 4.26.2 engine, we don't have access to IsEmpty on a TArray.
-	//			Getting Max == 0 *should* return the same functionality.
+	/* [4.26] 	Under the 4.26.2 engine, we don't have access to IsEmpty on a TArray.
+	 *			Getting Max == 0 *should* return the same functionality. */
 	#if !UE4_26
 	if (NotificationBudget::AtCap() || !NotificationBudget::Live.IsEmpty()) return false;
 	#else

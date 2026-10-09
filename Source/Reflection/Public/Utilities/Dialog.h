@@ -2,10 +2,10 @@
 
 #pragma once
 
-// [linux]  I would hope it's obvious that we don't have access to
-//          Windows libraries/code on a Linux environment. If anyone
-//          in the future cares enough, a proper guard for other
-//          platforms should probably be added here. (ie #if PLATFORM_WINDOWS)
+/* [linux]  I would hope it's obvious that we don't have access to
+ *          Windows libraries/code on a Linux environment. If anyone
+ *          in the future cares enough, a proper guard for other
+ *          platforms should probably be added here. (ie #if PLATFORM_WINDOWS) */
 #if  !PLATFORM_LINUX
 #include "Windows/WindowsPlatformApplicationMisc.h"
 #endif
@@ -137,8 +137,8 @@ inline FString GetClipboard() {
 	FString ClipboardContent;
 
 
-// [linux]  ClipboardPaste() doesn't seem to work properly at the engine-level
-//			under a Linux environment. Don't even compile this function under Linux.
+/* [linux]  ClipboardPaste() doesn't seem to work properly at the engine-level
+ *			under a Linux environment. Don't even compile this function under Linux. */
 #if  !PLATFORM_LINUX
 	/* @LINUX.CLIPBOARD */
 	FPlatformApplicationMisc::ClipboardPaste(ClipboardContent);

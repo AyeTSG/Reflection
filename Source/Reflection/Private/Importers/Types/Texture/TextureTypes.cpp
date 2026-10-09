@@ -29,8 +29,8 @@ bool FTextureTypes::HasPixelPayload(const FString& Type) {
 
 bool FTextureTypes::RequiresRawMipData(const FString& Type, const bool bIsVectorDisplacementMap) {
 #if PLATFORM_LINUX
-	// [linux]		Detex/NVTT currently do not work properly under a Linux environment.
-	//				For the meantime, Linux has to make-do with the encoded image.
+	/* [linux]		Detex/NVTT currently do not work properly under a Linux environment.
+	 *				For the meantime, Linux has to make-do with the encoded image. */
 	return false;
 #elif UE4_26_BELOW || UE5_5_BEYOND
 	/* Outside 4.27 through 5.4 the texture factory doesn't line up, so everything goes raw */

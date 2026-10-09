@@ -9,10 +9,10 @@
  * that is depends on how the unity blob was put together. */
 
  
-// [linux]  I would hope it's obvious that we don't have access to
-//          Windows libraries/code on a Linux environment. If anyone
-//          in the future cares enough, a proper guard for other
-//          platforms should probably be added here. (ie #if PLATFORM_WINDOWS)
+/* [linux]  I would hope it's obvious that we don't have access to
+ *          Windows libraries/code on a Linux environment. If anyone
+ *          in the future cares enough, a proper guard for other
+ *          platforms should probably be added here. (ie #if PLATFORM_WINDOWS) */
 #if  !PLATFORM_LINUX
 #include "Windows/WindowsHWrapper.h"
 #include "Windows/AllowWindowsPlatformTypes.h"
@@ -23,10 +23,10 @@
 inline void CloseApplicationByProcessName(const FString& ProcessName) {
 
 
-// [linux]  I would hope it's obvious that we don't have access to
-//          Windows libraries/code on a Linux environment. If anyone
-//          in the future cares enough, a proper guard for other
-//          platforms should probably be added here. (ie #if PLATFORM_WINDOWS)
+/* [linux]  I would hope it's obvious that we don't have access to
+ *          Windows libraries/code on a Linux environment. If anyone
+ *          in the future cares enough, a proper guard for other
+ *          platforms should probably be added here. (ie #if PLATFORM_WINDOWS) */
 #if  !PLATFORM_LINUX
 	DWORD ProcessID = 0;
 
@@ -64,10 +64,10 @@ inline void CloseApplicationByProcessName(const FString& ProcessName) {
 inline bool IsProcessRunning(const FString& ProcessName) {
 
 
-// [linux]  I would hope it's obvious that we don't have access to
-//          Windows libraries/code on a Linux environment. If anyone
-//          in the future cares enough, a proper guard for other
-//          platforms should probably be added here. (ie #if PLATFORM_WINDOWS)
+/* [linux]  I would hope it's obvious that we don't have access to
+ *          Windows libraries/code on a Linux environment. If anyone
+ *          in the future cares enough, a proper guard for other
+ *          platforms should probably be added here. (ie #if PLATFORM_WINDOWS) */
 #if  !PLATFORM_LINUX
 	bool IsRunning = false;
 

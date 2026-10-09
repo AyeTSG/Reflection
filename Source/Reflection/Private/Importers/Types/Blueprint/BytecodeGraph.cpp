@@ -4195,7 +4195,7 @@ void FBytecodeGraph::Arrange() {
 	auto HeaderOf = [Row](UEdGraphNode* Node) {
 		/* Drawn as an operator rather than as a node, so there is no title above the pins */
 
-		// [linux]	We can't shadow variable members under linux.
+		/* [linux]	We can't shadow variable members under linux. */
 		#if !PLATFORM_LINUX
 		if (const UK2Node* Written = Cast<UK2Node>(Node); Written != nullptr && Written->ShouldDrawCompact()) {
 			return 0;
