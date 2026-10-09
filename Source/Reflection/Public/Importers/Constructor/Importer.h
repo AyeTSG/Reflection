@@ -24,6 +24,12 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 
+// [linux] 	Clang toolchain doesn't find the UMetaData header on it's own.
+// 			Let's help it out.
+#if PLATFORM_LINUX
+#include "UObject/MetaData.h"
+#endif
+
 /* The file a package name lands on, if any. */
 inline bool PackageFileOf(const FString& LongPackageName, FString& OutFilename) {
 #if ENGINE_UE5

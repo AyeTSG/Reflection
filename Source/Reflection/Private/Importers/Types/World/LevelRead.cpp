@@ -33,6 +33,12 @@
 #include "HLOD/HLODProxyDesc.h"
 #include "HierarchicalLOD.h"
 
+// [linux] 	Clang toolchain doesn't find the Importer header on it's own.
+// 			Let's help it out.
+#if PLATFORM_LINUX
+#include "Importers/Constructor/Importer.h"
+#endif
+
 /* An actor sits directly inside the level; everything else inside a package sits inside something */
 static const FName GActorOuter = TEXT("PersistentLevel");
 
